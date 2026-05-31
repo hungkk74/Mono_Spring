@@ -2,9 +2,11 @@ package com.monowear.controller;
 
 import com.monowear.dto.catalog.ProductResponse;
 import com.monowear.dto.chatbot.ChatBotResponse;
+import com.monowear.dto.chatbot.ChatRequest;
 import com.monowear.dto.common.ApiResponse;
 import com.monowear.exception.BadRequestException;
 import com.monowear.service.OpenRouterService;
+import com.monowear.service.OrderService;
 import com.monowear.service.ProductService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,7 +15,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -25,6 +26,7 @@ public class ChatBotController {
 
     private final OpenRouterService openRouterService;
     private final ProductService productService;
+    private final OrderService orderService;
 
     private static final String SYSTEM_PROMPT = "Bạn là trợ lý ảo thông minh của cửa hàng thời trang MONO WEAR (chuyên quần áo tối giản, hiện đại).\n" +
             "Nhiệm vụ của bạn là hỗ trợ khách hàng mua sắm, tư vấn thời trang, giải đáp chính sách của cửa hàng một cách lịch sự, thân thiện và ngắn gọn bằng tiếng Việt.\n" +
@@ -39,14 +41,55 @@ public class ChatBotController {
             "3. Đối với các câu hỏi khác, hãy trả lời tự nhiên dựa trên thông tin trên.";
 
     @PostMapping("/chat")
-    public ResponseEntity<ApiResponse<ChatBotResponse>> chat(@RequestBody Map<String, String> body) {
-        String message = body.get("message");
-        if (message == null || message.isBlank()) {
+    public ResponseEntity<ApiResponse<ChatBotResponse>> chat(@RequestBody ChatRequest request) {
+        if (request.message() == null || request.message().isBlank()) {
             throw new BadRequestException("Nội dung tin nhắn không được trống");
         }
 
-        log.info("ChatBot query: {}", message);
-        String answer = openRouterService.chat(SYSTEM_PROMPT, message);
+        log.info("ChatBot stateful query: {}", request.message());
+
+        // 1. Phân tích ngữ cảnh Đơn hàng thực tế
+        String orderContext = "";
+        Pattern orderPattern = Pattern.compile("#?(\\d{1,12})");
+        Matcher orderMatcher = orderPattern.matcher(request.message());
+        if (orderMatcher.find()) {
+            try {
+                Long orderId = Long.parseLong(orderMatcher.group(1));
+                var orderTracking = orderService.getTrackingById(orderId);
+                if (orderTracking != null) {
+                    orderContext = String.format(
+                        "\n[THÔNG TIN ĐƠN HÀNG THỰC TẾ]: Đơn hàng #%d có trạng thái vận chuyển hiện tại là: %s. Tổng giá trị thanh toán: %,.0f VNĐ. Ngày đặt hàng: %s. Phương thức thanh toán: %s.",
+                        orderTracking.id(),
+                        orderTracking.status(),
+                        orderTracking.totalAmount(),
+                        orderTracking.createdAt().toString(),
+                        orderTracking.paymentMethod()
+                    );
+                }
+            } catch (Exception e) {
+                log.warn("Failed to fetch order tracking context for bot", e);
+            }
+        }
+
+        // 2. Phân tích ngữ cảnh cá nhân hóa người dùng
+        String finalSystemPrompt = SYSTEM_PROMPT;
+        if (request.userContext() != null && request.userContext().fullName() != null && !request.userContext().fullName().isBlank()) {
+            finalSystemPrompt += String.format(
+                "\nThông tin tài khoản khách hàng đang nhắn tin: Tên: %s, Email: %s, Số sản phẩm hiện có trong giỏ hàng: %d." +
+                " Hãy ưu tiên chào hỏi thân mật bằng tên riêng của họ (ví dụ: Chào anh/chị %s).",
+                request.userContext().fullName(),
+                request.userContext().email(),
+                request.userContext().cartCount() != null ? request.userContext().cartCount() : 0,
+                request.userContext().fullName()
+            );
+        }
+
+        if (!orderContext.isEmpty()) {
+            finalSystemPrompt += orderContext + "\nHãy dựa vào dữ liệu [THÔNG TIN ĐƠN HÀNG THỰC TẾ] phía trên để trả lời trực tiếp và tóm tắt ngắn gọn trạng thái đơn hàng này cho khách hàng.";
+        }
+
+        // 3. Gọi OpenRouter với đầy đủ hội thoại lịch sử
+        String answer = openRouterService.chat(finalSystemPrompt, request.message(), request.history());
 
         List<ProductResponse> products = new ArrayList<>();
         String cleanAnswer = answer;
@@ -61,7 +104,7 @@ public class ChatBotController {
             if (keywords.length > 0) {
                 String primaryKeyword = keywords[0].trim();
                 try {
-                    var paged = productService.listActive(0, 4, null, primaryKeyword, null, null, false);
+                    var paged = productService.listActive(0, 8, null, primaryKeyword, null, null, false);
                     if (paged != null && paged.content() != null) {
                         products.addAll(paged.content());
                     }

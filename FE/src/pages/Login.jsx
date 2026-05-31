@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { signInWithGooglePopup } from '../firebase';
 
 export default function Login() {
-  const { login, isLoggedIn } = useAuth();
+  const { login, loginWithGoogle, isLoggedIn } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,6 +32,30 @@ export default function Login() {
       }
     } catch {
       setError('Không thể kết nối đến máy chủ.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const result = await signInWithGooglePopup();
+      const idToken = await result.user.getIdToken();
+      const res = await loginWithGoogle(idToken);
+      if (res.ok) {
+        setSuccess('Đăng nhập thành công! Đang chuyển hướng...');
+        setTimeout(() => navigate('/'), 1000);
+      } else {
+        setError(res.message || 'Đăng nhập bằng Google thất bại.');
+      }
+    } catch (err) {
+      console.error(err);
+      if (err.code !== 'auth/popup-closed-by-user') {
+        setError('Đăng nhập bằng Google thất bại hoặc bị hủy.');
+      }
     } finally {
       setLoading(false);
     }
@@ -82,7 +107,12 @@ export default function Login() {
           <span>Hoặc</span>
         </div>
 
-        <button className="btn btn-outline btn-full btn-social">
+        <button
+          type="button"
+          className="btn btn-outline btn-full btn-social"
+          onClick={handleGoogleLogin}
+          disabled={loading}
+        >
           <span className="material-symbols-outlined">public</span>
           ĐĂNG NHẬP VỚI GOOGLE
         </button>

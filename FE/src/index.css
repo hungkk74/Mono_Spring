@@ -1950,6 +1950,38 @@ input[type="checkbox"]:checked + .cart-checkbox-custom { background: var(--prima
   gap: 8px;
   margin-top: 12px;
 }
+/* Carousel & Premium Product Cards for ChatBot */
+.chatbot-products-carousel {
+  display: flex;
+  overflow-x: auto;
+  gap: 12px;
+  padding: 8px 4px;
+  margin-top: 10px;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+}
+.chatbot-products-carousel::-webkit-scrollbar {
+  height: 4px;
+}
+.chatbot-products-carousel::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+.chatbot-products-carousel::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+}
+.chatbot-products-carousel::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
+}
+.chatbot-product-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.chatbot-product-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+  border-color: var(--primary) !important;
+}
 .chatbot-product {
   display: grid;
   grid-template-columns: 46px 1fr;

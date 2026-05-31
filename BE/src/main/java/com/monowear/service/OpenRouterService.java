@@ -29,6 +29,10 @@ public class OpenRouterService {
     @Value("${openrouter.api-url}") private String apiUrl;
 
     public String chat(String systemPrompt, String userMessage) {
+        return chat(systemPrompt, userMessage, java.util.List.of());
+    }
+
+    public String chat(String systemPrompt, String userMessage, java.util.List<com.monowear.dto.chatbot.ChatRequest.ChatMessage> history) {
         try {
             var body = MAPPER.createObjectNode();
             body.put("model", model.trim());
@@ -38,6 +42,17 @@ public class OpenRouterService {
             systemMsg.put("role", "system");
             systemMsg.put("content", systemPrompt);
             messages.add(systemMsg);
+
+            if (history != null && !history.isEmpty()) {
+                for (var historyMsg : history) {
+                    var msg = MAPPER.createObjectNode();
+                    String role = "bot".equalsIgnoreCase(historyMsg.role()) || "assistant".equalsIgnoreCase(historyMsg.role()) ? "assistant" : "user";
+                    msg.put("role", role);
+                    msg.put("content", historyMsg.text());
+                    messages.add(msg);
+                }
+            }
+
             var userMsg = MAPPER.createObjectNode();
             userMsg.put("role", "user");
             userMsg.put("content", userMessage);

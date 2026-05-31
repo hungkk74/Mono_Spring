@@ -20,6 +20,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -137,7 +139,22 @@ public class ProductService {
         StringBuilder query = new StringBuilder("SELECT DISTINCT p FROM Product p JOIN FETCH p.category");
         StringBuilder countQuery = new StringBuilder("SELECT count(DISTINCT p) FROM Product p");
 
-        boolean hasSkuJoin = (skuSizes != null && !skuSizes.isEmpty()) || (skuColors != null && !skuColors.isEmpty());
+        // Clean & normalize size filters for robust exact matching
+        List<String> cleanSizes = skuSizes == null ? List.of() : skuSizes.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .map(String::toUpperCase)
+                .filter(s -> !s.isEmpty())
+                .toList();
+
+        // Clean color filters (keeping original case for LIKE mapping but will be lowercased for binding)
+        List<String> cleanColors = skuColors == null ? List.of() : skuColors.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+
+        boolean hasSkuJoin = !cleanSizes.isEmpty() || !cleanColors.isEmpty();
         if (hasSkuJoin) {
             query.append(" LEFT JOIN p.skus s");
             countQuery.append(" LEFT JOIN p.skus s");
@@ -167,15 +184,28 @@ public class ProductService {
                     .append(" AND (p.saleStartAt IS NULL OR p.saleStartAt <= CURRENT_TIMESTAMP)")
                     .append(" AND (p.saleEndAt IS NULL OR p.saleEndAt >= CURRENT_TIMESTAMP)");
         }
-        if (skuSizes != null && !skuSizes.isEmpty()) {
-            query.append(" AND s.size IN :skuSizes AND s.isActive = true");
-            countQuery.append(" AND s.size IN :skuSizes AND s.isActive = true");
-            params.put("skuSizes", skuSizes);
+        if (!cleanSizes.isEmpty()) {
+            query.append(" AND UPPER(TRIM(s.size)) IN :skuSizes AND s.isActive = true");
+            countQuery.append(" AND UPPER(TRIM(s.size)) IN :skuSizes AND s.isActive = true");
+            params.put("skuSizes", cleanSizes);
         }
-        if (skuColors != null && !skuColors.isEmpty()) {
-            query.append(" AND s.color IN :skuColors AND s.isActive = true");
-            countQuery.append(" AND s.color IN :skuColors AND s.isActive = true");
-            params.put("skuColors", skuColors);
+        if (!cleanColors.isEmpty()) {
+            StringBuilder colorClause = new StringBuilder(" AND (");
+            StringBuilder countColorClause = new StringBuilder(" AND (");
+            for (int i = 0; i < cleanColors.size(); i++) {
+                String paramName = "color_" + i;
+                if (i > 0) {
+                    colorClause.append(" OR ");
+                    countColorClause.append(" OR ");
+                }
+                colorClause.append("LOWER(s.color) LIKE :").append(paramName);
+                countColorClause.append("LOWER(s.color) LIKE :").append(paramName);
+                params.put(paramName, "%" + cleanColors.get(i).toLowerCase() + "%");
+            }
+            colorClause.append(") AND s.isActive = true");
+            countColorClause.append(") AND s.isActive = true");
+            query.append(colorClause);
+            countQuery.append(countColorClause);
         }
 
         var qCount = em.createQuery(countQuery.toString(), Long.class);
@@ -184,13 +214,27 @@ public class ProductService {
 
         TypedQuery<Product> dataQuery = em.createQuery(query.toString(), Product.class);
         params.forEach(dataQuery::setParameter);
-        List<ProductResponse> items = dataQuery
+        List<Product> products = dataQuery
                 .setFirstResult(page * size)
                 .setMaxResults(size)
-                .getResultList()
-                .stream()
-                .map(ProductResponse::from)
+                .getResultList();
+
+        // Optimized bulk query to avoid N+1 queries
+        Map<Long, List<Sku>> skusMap = new HashMap<>();
+        if (!products.isEmpty()) {
+            List<Long> productIds = products.stream().map(Product::getId).toList();
+            List<Sku> skus = em.createQuery(
+                "SELECT s FROM Sku s WHERE s.product.id IN :productIds AND s.isActive = true", Sku.class)
+                .setParameter("productIds", productIds)
+                .getResultList();
+            skusMap = skus.stream().collect(Collectors.groupingBy(s -> s.getProduct().getId()));
+        }
+
+        Map<Long, List<Sku>> finalSkusMap = skusMap;
+        List<ProductResponse> items = products.stream()
+                .map(p -> ProductResponse.from(p, finalSkusMap.getOrDefault(p.getId(), List.of())))
                 .toList();
+
         return PagedResponse.of(items, page, size, total);
     }
 

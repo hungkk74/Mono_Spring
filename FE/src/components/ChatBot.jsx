@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { catalogApi, orderApi, chatbotApi } from '../api';
 import { formatCurrency, formatDate, getStatusInfo } from '../utils/format';
+import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
 
 const quickActions = [
   'Tư vấn sản phẩm',
@@ -126,6 +128,8 @@ function staticAnswer(normalizedText) {
 }
 
 export default function ChatBot() {
+  const { user, isLoggedIn } = useAuth();
+  const { cartCount } = useCart();
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -301,7 +305,18 @@ Ngày đặt: ${formatDate(order.createdAt)}.`;
     ]);
 
     try {
-      const res = await chatbotApi.chat(question);
+      const history = messages.slice(-5).map((msg) => ({
+        role: msg.role === 'user' ? 'user' : 'bot',
+        text: msg.text || ''
+      }));
+
+      const userContext = isLoggedIn && user ? {
+        fullName: user.fullName,
+        email: user.email,
+        cartCount: cartCount || 0
+      } : {};
+
+      const res = await chatbotApi.chat(question, history, userContext);
       if (!res.ok || !res.data) {
         throw new Error(res?.message || "Lỗi phản hồi từ chatbot");
       }
@@ -555,59 +570,107 @@ Ngày đặt: ${formatDate(order.createdAt)}.`;
                       <p style={{ whiteSpace: 'pre-line' }}>{message.text}</p>
 
                       {message.products?.length > 0 && (
-                        <div className="chatbot-products" style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '8px' }}>
+                        <div className="chatbot-products-carousel" style={{
+                          display: 'flex',
+                          overflowX: 'auto',
+                          gap: '12px',
+                          padding: '8px 0',
+                          marginTop: '10px',
+                          scrollSnapType: 'x mandatory',
+                          WebkitOverflowScrolling: 'touch'
+                        }}>
                           {message.products.map((product) => {
                             const price = getProductPrice(product);
+                            const hasSale = product.onSale && product.salePercent > 0;
+                            const salePrice = hasSale
+                              ? Math.round(Number(price) * (100 - Number(product.salePercent || 0)) / 100)
+                              : null;
                             return (
-                              <button
-                                type="button"
-                                className="chatbot-product"
-                                onClick={() => setSelectedProduct(product)}
+                              <div
                                 key={product.id || product.slug}
+                                className="chatbot-product-card"
                                 style={{
-                                  display: 'flex',
-                                  width: '100%',
-                                  alignItems: 'center',
-                                  gap: '10px',
-                                  padding: '8px',
+                                  flex: '0 0 160px',
+                                  scrollSnapAlign: 'start',
                                   border: '1px solid var(--border-color, #eee)',
-                                  borderRadius: '6px',
-                                  background: 'var(--bg-card, #f9f9f9)',
-                                  cursor: 'pointer',
-                                  textAlign: 'left'
+                                  borderRadius: '8px',
+                                  background: 'var(--bg-card, #fcfcfc)',
+                                  overflow: 'hidden',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                                  position: 'relative'
                                 }}
                               >
+                                {hasSale && (
+                                  <span style={{
+                                    position: 'absolute',
+                                    top: '6px',
+                                    left: '6px',
+                                    background: '#e63946',
+                                    color: '#fff',
+                                    fontSize: '9px',
+                                    fontWeight: '700',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    zIndex: 2
+                                  }}>
+                                    -{product.salePercent}%
+                                  </span>
+                                )}
                                 <img
-                                  src={product.imageUrl || 'https://via.placeholder.com/80'}
+                                  src={product.imageUrl || 'https://via.placeholder.com/160x120'}
                                   alt={product.name}
-                                  style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '4px' }}
+                                  style={{ width: '100%', height: '100px', objectFit: 'cover', borderBottom: '1px solid #eee' }}
                                 />
-                                <span style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
-                                  <strong style={{ fontSize: '13px', color: 'var(--text-primary, #111)', fontWeight: '600' }}>{product.name}</strong>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-                                    {(() => {
-                                      const hasSale = product.onSale && product.salePercent > 0;
-                                      const salePrice = hasSale
-                                        ? Math.round(Number(price) * (100 - Number(product.salePercent || 0)) / 100)
-                                        : null;
-                                      return price ? (
-                                        <>
-                                          <span style={{ fontSize: '12px', fontWeight: '700', color: '#e63946' }}>
-                                            {formatCurrency(salePrice || price)}
-                                          </span>
-                                          {hasSale && (
-                                            <span style={{ fontSize: '10px', textDecoration: 'line-through', color: 'var(--text-muted, #999)' }}>
-                                              {formatCurrency(price)}
-                                            </span>
-                                          )}
-                                        </>
-                                      ) : (
-                                        <span style={{ fontSize: '11px', color: 'var(--text-muted, #777)' }}>{product.categoryName}</span>
-                                      );
-                                    })()}
+                                <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', flexGrow: 1 }}>
+                                  <h4 style={{
+                                    fontSize: '11px',
+                                    margin: '0 0 4px 0',
+                                    fontWeight: '600',
+                                    lineHeight: '1.3',
+                                    height: '2.6em',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    display: '-webkit-box',
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: 'vertical',
+                                    color: 'var(--text-primary, #111)'
+                                  }}>
+                                    {product.name}
+                                  </h4>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: 'auto' }}>
+                                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#e63946' }}>
+                                      {formatCurrency(salePrice || price || 0)}
+                                    </span>
+                                    {hasSale && (
+                                      <span style={{ fontSize: '9px', textDecoration: 'line-through', color: 'var(--text-muted, #999)' }}>
+                                        {formatCurrency(price || 0)}
+                                      </span>
+                                    )}
                                   </div>
-                                </span>
-                              </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedProduct(product)}
+                                    style={{
+                                      width: '100%',
+                                      border: 'none',
+                                      background: 'var(--color-primary, #111)',
+                                      color: '#fff',
+                                      fontSize: '10px',
+                                      fontWeight: '600',
+                                      padding: '6px 0',
+                                      borderRadius: '4px',
+                                      marginTop: '8px',
+                                      cursor: 'pointer',
+                                      textTransform: 'uppercase',
+                                      textAlign: 'center'
+                                    }}
+                                  >
+                                    Chi tiết
+                                  </button>
+                                </div>
+                              </div>
                             );
                           })}
                         </div>

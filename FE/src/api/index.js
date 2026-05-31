@@ -78,6 +78,12 @@ export const authApi = {
     const res = await api.put('/auth/me', data);
     return parse(res);
   },
+  loginWithGoogle: async (idToken) => {
+    try {
+      const res = await api.post('/auth/google', { idToken });
+      return parse(res);
+    } catch (e) { return parseError(e); }
+  },
   // ===== Forgot Password =====
   forgotPassword: async (email) => {
     try {
@@ -313,9 +319,9 @@ export const paymentApi = {
 
 // ==================== CHATBOT ====================
 export const chatbotApi = {
-  chat: async (message) => {
+  chat: async (message, history = [], userContext = {}) => {
     try {
-      const res = await api.post('/public/chatbot/chat', { message });
+      const res = await api.post('/public/chatbot/chat', { message, history, userContext });
       return parse(res);
     } catch (e) { return parseError(e); }
   },

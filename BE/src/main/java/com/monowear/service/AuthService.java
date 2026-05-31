@@ -30,6 +30,9 @@ public class AuthService {
     private final ResetTokenBlacklist resetTokenBlacklist;
     private final EmailService emailService;
 
+    @org.springframework.beans.factory.annotation.Value("${firebase.api-key:AIzaSyDZr-k5hCgQPCwN3-n_WIx5nCKkdFJenq0}")
+    private String firebaseApiKey;
+
     /**
      * Đăng ký tài khoản mới (CUSTOMER).
      */
@@ -74,6 +77,89 @@ public class AuthService {
 
         String token = generateToken(user);
         return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserResponse.from(user));
+    }
+
+    /**
+     * Đăng nhập / Đăng ký tự động bằng tài khoản Google.
+     */
+    public AuthResponse loginWithGoogle(String idToken) {
+        if (idToken == null || idToken.isBlank()) {
+            throw new BadRequestException("Google ID Token không được để trống", "GOOGLE_TOKEN_REQUIRED");
+        }
+
+        // 1. Xác thực ID Token qua Google API
+        java.util.Map<String, Object> claims = verifyGoogleIdToken(idToken);
+        String email = (String) claims.get("email");
+        String name = (String) claims.get("name");
+
+        if (email == null || email.isBlank()) {
+            throw new BadRequestException("Không thể lấy thông tin email từ tài khoản Google", "GOOGLE_EMAIL_NOT_FOUND");
+        }
+
+        String normalized = email.trim().toLowerCase();
+
+        // 2. Tìm kiếm hoặc tự động đăng ký khách hàng mới
+        User user = userRepository.findByEmail(normalized).orElse(null);
+        if (user == null) {
+            user = new User();
+            user.setEmail(normalized);
+            user.setFullName(name != null && !name.isBlank() ? name.trim() : "Người dùng Google");
+            user.setRole(UserRole.CUSTOMER);
+            user.setPasswordHash(passwordEncoder.encode(java.util.UUID.randomUUID().toString()));
+            user.setIsActive(true);
+            userRepository.save(user);
+            log.info("Google user auto-registered: {} (ID: {})", user.getEmail(), user.getId());
+        } else {
+            if (!user.getIsActive()) {
+                throw new BadRequestException("Tài khoản đã bị vô hiệu hóa", "ACCOUNT_DISABLED");
+            }
+            log.info("Google user logged in: {} (ID: {})", user.getEmail(), user.getId());
+        }
+
+        // 3. Tạo JWT access token và phản hồi
+        String token = generateToken(user);
+        return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserResponse.from(user));
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.Map<String, Object> verifyGoogleIdToken(String idToken) {
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+            String payload = String.format("{\"idToken\":\"%s\"}", idToken.replace("\"", "\\\""));
+
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create("https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=" + firebaseApiKey))
+                    .header("Content-Type", "application/json")
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(payload, java.nio.charset.StandardCharsets.UTF_8))
+                    .timeout(java.time.Duration.ofSeconds(10))
+                    .build();
+
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() != 200) {
+                log.warn("Firebase ID token verification failed with status {}: {}", response.statusCode(), response.body());
+                throw new BadRequestException("Mã xác thực Google không hợp lệ hoặc đã hết hạn", "GOOGLE_TOKEN_INVALID");
+            }
+
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            java.util.Map<String, Object> result = mapper.readValue(response.body(), java.util.Map.class);
+
+            java.util.List<java.util.Map<String, Object>> users = (java.util.List<java.util.Map<String, Object>>) result.get("users");
+            if (users == null || users.isEmpty()) {
+                throw new BadRequestException("Không tìm thấy thông tin tài khoản", "GOOGLE_USER_NOT_FOUND");
+            }
+
+            java.util.Map<String, Object> userClaims = users.get(0);
+            return java.util.Map.of(
+                "email", userClaims.getOrDefault("email", ""),
+                "name", userClaims.getOrDefault("displayName", "")
+            );
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error verifying Google Firebase ID Token", e);
+            throw new BadRequestException("Không thể xác thực tài khoản Google vào lúc này", "GOOGLE_AUTH_ERROR");
+        }
     }
 
     /**

@@ -39,6 +39,9 @@ public class EmailService {
      */
     @Async
     public void sendOtpEmail(String toEmail, String recipientName, String otpCode, int ttlMinutes) {
+        log.info("================================================================");
+        log.info("DEVELOPER ALERT: OTP for [{}] is: [ {} ] (Expires in {}m)", toEmail, otpCode, ttlMinutes);
+        log.info("================================================================");
         String subject = "Mã xác thực đặt lại mật khẩu - MONO WEAR";
         String html = buildOtpEmailHtml(recipientName, otpCode, ttlMinutes);
         sendEmail(toEmail, subject, html);

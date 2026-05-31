@@ -1,6 +1,7 @@
 package com.monowear.dto.catalog;
 
 import com.monowear.entity.Product;
+import com.monowear.entity.Sku;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
@@ -52,6 +53,39 @@ public record ProductResponse(
                 product.getUpdatedAt()
         );
     }
+
+    /**
+     * Mapping flat kèm danh sách SKU bên ngoài để tránh N+1.
+     */
+    public static ProductResponse from(Product product, List<Sku> activeSkus) {
+        BigDecimal minPrice = activeSkus == null || activeSkus.isEmpty() ? null : activeSkus.stream()
+                .filter(sku -> sku.getPrice() != null)
+                .min(Comparator.comparing(Sku::getPrice))
+                .map(Sku::getPrice)
+                .orElse(null);
+
+        return new ProductResponse(
+                product.getId(),
+                product.getName(),
+                product.getSlug(),
+                product.getMaterial(),
+                product.getDescription(),
+                product.getImageUrl(),
+                product.getSalePercent(),
+                product.getSaleStartAt(),
+                product.getSaleEndAt(),
+                product.isOnSale(),
+                minPrice,
+                salePrice(product, minPrice),
+                product.getIsActive(),
+                product.getCategory().getId(),
+                product.getCategory().getName(),
+                null,
+                product.getCreatedAt(),
+                product.getUpdatedAt()
+        );
+    }
+
 
     /**
      * Mapping kèm danh sách SKU (cho trang chi tiết).

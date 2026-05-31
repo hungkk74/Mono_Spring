@@ -27,6 +27,17 @@ export function AuthProvider({ children }) {
     return res;
   }, []);
 
+  const loginWithGoogle = useCallback(async (idToken) => {
+    const res = await authApi.loginWithGoogle(idToken);
+    if (res.ok) {
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      setToken(res.data.token);
+      setUser(res.data.user);
+    }
+    return res;
+  }, []);
+
   const register = useCallback(async (data) => {
     const res = await authApi.register(data);
     if (res.ok) {
@@ -72,9 +83,9 @@ export function AuthProvider({ children }) {
 
   const value = useMemo(() => ({
     user, token, isLoggedIn, isAdmin, isStaff, isAdminOrStaff, loading,
-    login, register, logout, refreshProfile, updateProfile,
+    login, loginWithGoogle, register, logout, refreshProfile, updateProfile,
   }), [user, token, isLoggedIn, isAdmin, isStaff, isAdminOrStaff, loading,
-       login, register, logout, refreshProfile, updateProfile]);
+       login, loginWithGoogle, register, logout, refreshProfile, updateProfile]);
 
   return (
     <AuthContext.Provider value={value}>
