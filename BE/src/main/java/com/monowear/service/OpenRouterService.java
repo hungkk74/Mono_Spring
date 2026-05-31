@@ -3,9 +3,9 @@ package com.monowear.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monowear.exception.BadRequestException;
-import jakarta.enterprise.context.ApplicationScoped;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -14,24 +14,19 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
-@ApplicationScoped
+@Service
+@Slf4j
 public class OpenRouterService {
 
-    private static final Logger LOG = Logger.getLogger(OpenRouterService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
             .build();
 
-    @ConfigProperty(name = "openrouter.api-key")
-    String apiKey;
-
-    @ConfigProperty(name = "openrouter.model")
-    String model;
-
-    @ConfigProperty(name = "openrouter.api-url")
-    String apiUrl;
+    @Value("${openrouter.api-key}") private String apiKey;
+    @Value("${openrouter.model}") private String model;
+    @Value("${openrouter.api-url}") private String apiUrl;
 
     public String chat(String systemPrompt, String userMessage) {
         try {
@@ -39,20 +34,15 @@ public class OpenRouterService {
             body.put("model", model.trim());
 
             var messages = MAPPER.createArrayNode();
-
             var systemMsg = MAPPER.createObjectNode();
             systemMsg.put("role", "system");
             systemMsg.put("content", systemPrompt);
             messages.add(systemMsg);
-
             var userMsg = MAPPER.createObjectNode();
             userMsg.put("role", "user");
             userMsg.put("content", userMessage);
             messages.add(userMsg);
-
             body.set("messages", messages);
-
-            String requestBody = MAPPER.writeValueAsString(body);
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(apiUrl.trim()))
@@ -60,14 +50,14 @@ public class OpenRouterService {
                     .header("Content-Type", "application/json")
                     .header("HTTP-Referer", "https://monowear.io")
                     .header("X-Title", "Mono Wear")
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBody, StandardCharsets.UTF_8))
+                    .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body), StandardCharsets.UTF_8))
                     .timeout(Duration.ofSeconds(30))
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() >= 400) {
-                LOG.errorf("OpenRouter API error [%d]: %s", response.statusCode(), response.body());
+                log.error("OpenRouter API error [{}]: {}", response.statusCode(), response.body());
                 throw new BadRequestException("Lỗi phản hồi từ AI");
             }
 
@@ -76,12 +66,10 @@ public class OpenRouterService {
             if (choices.isArray() && !choices.isEmpty()) {
                 return choices.get(0).path("message").path("content").asText("").trim();
             }
-
             return "Trợ lý ảo hiện tại không thể phản hồi câu hỏi này.";
-        } catch (BadRequestException e) {
-            throw e;
-        } catch (Exception e) {
-            LOG.error("OpenRouter request failed", e);
+        } catch (BadRequestException e) { throw e; }
+        catch (Exception e) {
+            log.error("OpenRouter request failed", e);
             throw new BadRequestException("Không thể kết nối trợ lý AI: " + e.getMessage());
         }
     }

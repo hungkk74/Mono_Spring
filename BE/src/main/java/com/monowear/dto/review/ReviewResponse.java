@@ -15,17 +15,17 @@ public record ReviewResponse(
         List<ReviewReplyResponse> replies
 ) {
     public static ReviewResponse from(Review review) {
-        List<ReviewReplyResponse> replyList = (review.replies != null)
-                ? review.replies.stream().map(ReviewReplyResponse::from).toList()
+        List<ReviewReplyResponse> replyList = (review.getReplies() != null)
+                ? review.getReplies().stream().map(ReviewReplyResponse::from).toList()
                 : List.of();
         return new ReviewResponse(
-                review.id,
-                review.product.id,
-                review.user.id,
-                review.user.fullName,
-                review.rating,
-                review.comment,
-                review.createdAt,
+                review.getId(),
+                review.getProduct().getId(),
+                review.getUser().getId(),
+                review.getUser().getFullName(),
+                review.getRating(),
+                review.getComment(),
+                review.getCreatedAt(),
                 replyList
         );
     }

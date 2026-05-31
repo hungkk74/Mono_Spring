@@ -7,121 +7,98 @@ import com.monowear.entity.Product;
 import com.monowear.entity.Sku;
 import com.monowear.exception.DuplicateResourceException;
 import com.monowear.exception.ResourceNotFoundException;
-import io.quarkus.panache.common.Page;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.transaction.Transactional;
-import org.jboss.logging.Logger;
+import com.monowear.repository.ProductRepository;
+import com.monowear.repository.SkuRepository;
+import jakarta.persistence.EntityManager;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
-@ApplicationScoped
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class SkuService {
 
-    private static final Logger LOG = Logger.getLogger(SkuService.class);
+    private final SkuRepository skuRepository;
+    private final ProductRepository productRepository;
+    private final EntityManager em;
 
-    // ==================== ADMIN/STAFF ====================
-
-    /**
-     * Lấy danh sách SKU theo product (phân trang).
-     */
     public PagedResponse<SkuResponse> listByProduct(Long productId, int page, int size) {
-        var query = Sku.find("product.id", productId);
-        long total = query.count();
-        List<SkuResponse> items = query
-                .page(Page.of(page, size))
-                .list()
-                .stream()
-                .map(e -> SkuResponse.from((Sku) e))
-                .toList();
+        List<Long> ids = em.createQuery("SELECT s.id FROM Sku s WHERE s.product.id = :pid", Long.class)
+                .setParameter("pid", productId)
+                .setFirstResult(page * size)
+                .setMaxResults(size)
+                .getResultList();
+        long total = skuRepository.countByProductId(productId);
+        List<SkuResponse> items = ids.isEmpty() ? List.of() :
+                skuRepository.findAllById(ids).stream().map(SkuResponse::from).toList();
         return PagedResponse.of(items, page, size, total);
     }
 
-    /**
-     * Lấy chi tiết SKU theo ID.
-     */
     public SkuResponse getById(Long id) {
         Sku sku = findOrThrow(id);
         return SkuResponse.from(sku);
     }
 
-    /**
-     * Tạo SKU mới.
-     */
     @Transactional
     public SkuResponse create(SkuRequest request) {
-        // Validate product
-        Product product = Product.findById(request.productId());
-        if (product == null) {
-            throw new ResourceNotFoundException("Sản phẩm", request.productId());
-        }
+        Product product = productRepository.findById(request.productId())
+                .orElseThrow(() -> new ResourceNotFoundException("Sản phẩm", request.productId()));
 
-        // Check duplicate sku_code
-        if (Sku.findBySkuCode(request.skuCode()).isPresent()) {
+        if (skuRepository.findBySkuCode(request.skuCode()).isPresent()) {
             throw new DuplicateResourceException("Mã SKU [" + request.skuCode() + "] đã tồn tại");
         }
 
         Sku sku = new Sku();
-        sku.product = product;
-        sku.skuCode = request.skuCode().trim().toUpperCase();
-        sku.size = request.size().trim();
-        sku.color = request.color().trim();
-        sku.price = request.price();
-        sku.stock = request.stock();
-        sku.isActive = true;
-        sku.persist();
+        sku.setProduct(product);
+        sku.setSkuCode(request.skuCode().trim().toUpperCase());
+        sku.setSize(request.size().trim());
+        sku.setColor(request.color().trim());
+        sku.setPrice(request.price());
+        sku.setStock(request.stock());
+        sku.setIsActive(true);
+        skuRepository.save(sku);
 
-        LOG.infof("SKU created: %s (ID: %d, Product: %s)", sku.skuCode, sku.id, product.name);
+        log.info("SKU created: {} (ID: {}, Product: {})", sku.getSkuCode(), sku.getId(), product.getName());
         return SkuResponse.from(sku);
     }
 
-    /**
-     * Cập nhật SKU.
-     */
     @Transactional
     public SkuResponse update(Long id, SkuRequest request) {
         Sku sku = findOrThrow(id);
 
-        // Validate product
-        Product product = Product.findById(request.productId());
-        if (product == null) {
-            throw new ResourceNotFoundException("Sản phẩm", request.productId());
-        }
+        Product product = productRepository.findById(request.productId())
+                .orElseThrow(() -> new ResourceNotFoundException("Sản phẩm", request.productId()));
 
-        // Check duplicate sku_code (exclude self)
-        Sku.findBySkuCode(request.skuCode()).ifPresent(existing -> {
-            if (!existing.id.equals(id)) {
+        skuRepository.findBySkuCode(request.skuCode()).ifPresent(existing -> {
+            if (!existing.getId().equals(id)) {
                 throw new DuplicateResourceException("Mã SKU [" + request.skuCode() + "] đã tồn tại");
             }
         });
 
-        sku.product = product;
-        sku.skuCode = request.skuCode().trim().toUpperCase();
-        sku.size = request.size().trim();
-        sku.color = request.color().trim();
-        sku.price = request.price();
-        sku.stock = request.stock();
+        sku.setProduct(product);
+        sku.setSkuCode(request.skuCode().trim().toUpperCase());
+        sku.setSize(request.size().trim());
+        sku.setColor(request.color().trim());
+        sku.setPrice(request.price());
+        sku.setStock(request.stock());
 
-        LOG.infof("SKU updated: %s (ID: %d)", sku.skuCode, sku.id);
+        log.info("SKU updated: {} (ID: {})", sku.getSkuCode(), sku.getId());
         return SkuResponse.from(sku);
     }
 
-    /**
-     * Soft delete SKU.
-     */
     @Transactional
     public void delete(Long id) {
         Sku sku = findOrThrow(id);
-        sku.isActive = false;
-        LOG.infof("SKU soft-deleted: %s (ID: %d)", sku.skuCode, sku.id);
+        sku.setIsActive(false);
+        log.info("SKU soft-deleted: {} (ID: {})", sku.getSkuCode(), sku.getId());
     }
 
-    // ==================== HELPERS ====================
-
     private Sku findOrThrow(Long id) {
-        Sku sku = Sku.findById(id);
-        if (sku == null) {
-            throw new ResourceNotFoundException("SKU", id);
-        }
-        return sku;
+        return skuRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("SKU", id));
     }
 }

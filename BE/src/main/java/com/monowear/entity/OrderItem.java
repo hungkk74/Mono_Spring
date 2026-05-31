@@ -1,36 +1,41 @@
 package com.monowear.entity;
 
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "order_items")
-public class OrderItem extends io.quarkus.hibernate.orm.panache.PanacheEntityBase {
+@Getter @Setter @NoArgsConstructor
+public class OrderItem {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    public Long id;
+    private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_id", nullable = false)
-    public Order order;
+    private Order order;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sku_id", nullable = false)
-    public Sku sku;
+    private Sku sku;
 
     @Column(nullable = false)
-    public Integer quantity;
+    private Integer quantity;
 
     @Column(name = "unit_price", nullable = false, precision = 15, scale = 2)
-    public BigDecimal unitPrice;
+    private BigDecimal unitPrice;
 
     @Column(nullable = false, precision = 15, scale = 2)
-    public BigDecimal subtotal;
+    private BigDecimal subtotal;
 
     @Column(name = "created_at", updatable = false)
-    public LocalDateTime createdAt;
+    private LocalDateTime createdAt;
 
     // --- Lifecycle Callbacks ---
 

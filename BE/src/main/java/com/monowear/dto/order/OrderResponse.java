@@ -21,51 +21,45 @@ public record OrderResponse(
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
-    /**
-     * Mapping flat (không kèm items).
-     */
     public static OrderResponse from(Order order) {
         return new OrderResponse(
-                order.id,
-                order.user.id,
-                order.user.fullName,
-                order.status,
-                order.subtotalAmount,
-                order.discountAmount,
-                order.couponCode,
-                order.totalAmount,
-                order.shippingAddress,
-                order.paymentMethod,
+                order.getId(),
+                order.getUser().getId(),
+                order.getUser().getFullName(),
+                order.getStatus(),
+                order.getSubtotalAmount(),
+                order.getDiscountAmount(),
+                order.getCouponCode(),
+                order.getTotalAmount(),
+                order.getShippingAddress(),
+                order.getPaymentMethod(),
                 null,
-                order.createdAt,
-                order.updatedAt
+                order.getCreatedAt(),
+                order.getUpdatedAt()
         );
     }
 
-    /**
-     * Mapping kèm danh sách items (chi tiết đơn hàng).
-     */
     public static OrderResponse withItems(Order order) {
         List<OrderItemResponse> itemList = null;
-        if (order.items != null && !order.items.isEmpty()) {
-            itemList = order.items.stream()
+        if (order.getItems() != null && !order.getItems().isEmpty()) {
+            itemList = order.getItems().stream()
                     .map(OrderItemResponse::from)
                     .toList();
         }
         return new OrderResponse(
-                order.id,
-                order.user.id,
-                order.user.fullName,
-                order.status,
-                order.subtotalAmount,
-                order.discountAmount,
-                order.couponCode,
-                order.totalAmount,
-                order.shippingAddress,
-                order.paymentMethod,
+                order.getId(),
+                order.getUser().getId(),
+                order.getUser().getFullName(),
+                order.getStatus(),
+                order.getSubtotalAmount(),
+                order.getDiscountAmount(),
+                order.getCouponCode(),
+                order.getTotalAmount(),
+                order.getShippingAddress(),
+                order.getPaymentMethod(),
                 itemList,
-                order.createdAt,
-                order.updatedAt
+                order.getCreatedAt(),
+                order.getUpdatedAt()
         );
     }
 }

@@ -19,17 +19,17 @@ public record SkuResponse(
 ) {
     public static SkuResponse from(Sku sku) {
         return new SkuResponse(
-                sku.id,
-                sku.skuCode,
-                sku.size,
-                sku.color,
-                sku.price,
-                sku.stock,
-                sku.isActive,
-                sku.product.id,
-                sku.product.name,
-                sku.createdAt,
-                sku.updatedAt
+                sku.getId(),
+                sku.getSkuCode(),
+                sku.getSize(),
+                sku.getColor(),
+                sku.getPrice(),
+                sku.getStock(),
+                sku.getIsActive(),
+                sku.getProduct().getId(),
+                sku.getProduct().getName(),
+                sku.getCreatedAt(),
+                sku.getUpdatedAt()
         );
     }
 }

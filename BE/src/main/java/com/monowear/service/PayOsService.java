@@ -3,13 +3,14 @@ package com.monowear.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monowear.entity.Order;
-import com.monowear.entity.Sku;
 import com.monowear.entity.enums.OrderStatus;
 import com.monowear.exception.BadRequestException;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.transaction.Transactional;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
+import com.monowear.repository.OrderRepository;
+import com.monowear.repository.SkuRepository;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -23,46 +24,49 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
-@ApplicationScoped
+@Service
+@Slf4j
 public class PayOsService {
 
-    private static final Logger LOG = Logger.getLogger(PayOsService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
 
-    @ConfigProperty(name = "payos.api-url")
-    String apiUrl;
+    private final OrderRepository orderRepository;
+    private final SkuRepository skuRepository;
 
-    @ConfigProperty(name = "payos.client-id")
-    String clientId;
+    @Value("${payos.api-url}") private String apiUrl;
+    @Value("${payos.client-id}") private String clientId;
+    @Value("${payos.api-key}") private String apiKey;
+    @Value("${payos.checksum-key}") private String checksumKey;
+    @Value("${payos.return-url}") private String returnUrl;
+    @Value("${payos.cancel-url}") private String cancelUrl;
 
-    @ConfigProperty(name = "payos.api-key")
-    String apiKey;
-
-    @ConfigProperty(name = "payos.checksum-key")
-    String checksumKey;
-
-    @ConfigProperty(name = "payos.return-url")
-    String returnUrl;
-
-    @ConfigProperty(name = "payos.cancel-url")
-    String cancelUrl;
+    public PayOsService(OrderRepository orderRepository, SkuRepository skuRepository) {
+        this.orderRepository = orderRepository;
+        this.skuRepository = skuRepository;
+    }
 
     public Map<String, String> createPaymentLink(Long orderId, long amount) {
         try {
             validateConfig();
-
             long orderCode = orderId;
             String description = "MONOWEAR DH" + orderId;
 
-            Map<String, String> signatureData = new TreeMap<>();
-            signatureData.put("amount", String.valueOf(amount));
-            signatureData.put("cancelUrl", cancelUrl);
-            signatureData.put("description", description);
-            signatureData.put("orderCode", String.valueOf(orderCode));
-            signatureData.put("returnUrl", returnUrl);
+            TreeMap<String, String> checksumData = new TreeMap<>();
+            checksumData.put("amount", String.valueOf(amount));
+            checksumData.put("cancelUrl", cancelUrl);
+            checksumData.put("description", description);
+            checksumData.put("orderCode", String.valueOf(orderCode));
+            checksumData.put("returnUrl", returnUrl);
+
+            StringBuilder rawData = new StringBuilder();
+            for (Map.Entry<String, String> entry : checksumData.entrySet()) {
+                if (!rawData.isEmpty()) rawData.append("&");
+                rawData.append(entry.getKey()).append("=").append(entry.getValue());
+            }
+            String checksum = hmacSHA256(checksumKey, rawData.toString());
 
             var body = MAPPER.createObjectNode();
             body.put("orderCode", orderCode);
@@ -70,165 +74,105 @@ public class PayOsService {
             body.put("description", description);
             body.put("cancelUrl", cancelUrl);
             body.put("returnUrl", returnUrl);
-            body.put("signature", sign(signatureData));
 
-            HttpResponse<String> response = sendPost(apiUrl, MAPPER.writeValueAsString(body));
-            JsonNode json = MAPPER.readTree(response.body());
-            String code = json.path("code").asText("");
-
-            if (response.statusCode() >= 400 || !"00".equals(code)) {
-                String message = json.path("desc").asText("Khong the tao payment link payOS");
-                throw new BadRequestException("payOS error: " + message);
-            }
-
-            JsonNode data = json.path("data");
-            String checkoutUrl = data.path("checkoutUrl").asText("");
-            if (checkoutUrl.isBlank()) {
-                throw new BadRequestException("payOS khong tra ve checkoutUrl");
-            }
-
-            Map<String, String> result = new HashMap<>();
-            result.put("checkoutUrl", checkoutUrl);
-            result.put("paymentLinkId", data.path("paymentLinkId").asText(""));
-            result.put("orderCode", String.valueOf(orderCode));
-            result.put("qrCode", data.path("qrCode").asText(""));
-            result.put("amount", String.valueOf(amount));
-            return result;
-        } catch (BadRequestException e) {
-            throw e;
-        } catch (Exception e) {
-            LOG.error("payOS create payment link failed", e);
-            throw new BadRequestException("Khong the tao thanh toan payOS: " + e.getMessage());
-        }
-    }
-
-    @Transactional
-    public void syncPaymentStatus(Long orderCode) {
-        try {
-            validateConfig();
+            var item = MAPPER.createObjectNode();
+            item.put("name", "Thanh toán đơn hàng #" + orderId);
+            item.put("quantity", 1);
+            item.put("price", amount);
+            var items = MAPPER.createArrayNode();
+            items.add(item);
+            body.set("items", items);
+            body.put("signature", checksum);
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(apiUrl + "/" + orderCode))
+                    .uri(URI.create(apiUrl))
                     .timeout(Duration.ofSeconds(20))
-                    .header("x-client-id", clientId.trim())
-                    .header("x-api-key", apiKey.trim())
-                    .GET()
+                    .header("x-client-id", clientId)
+                    .header("x-api-key", apiKey)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
                     .build();
 
             HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
             JsonNode json = MAPPER.readTree(response.body());
-            String code = json.path("code").asText("");
 
-            if (response.statusCode() >= 400 || !"00".equals(code)) {
-                String message = json.path("desc").asText("Khong the kiem tra trang thai payOS");
-                throw new BadRequestException("payOS error: " + message);
+            log.info("payOS response: {}", response.body());
+
+            String code = json.path("code").asText("");
+            if (!"00".equals(code)) {
+                String msg = json.path("desc").asText("Không thể tạo link thanh toán payOS");
+                throw new BadRequestException("payOS error: " + msg);
             }
 
             JsonNode data = json.path("data");
-            String status = data.path("status").asText("");
-            Long orderId = data.path("orderCode").asLong(orderCode);
-
-            Order order = findOrderForPayment(orderId);
-            if (order == null) {
-                LOG.warnf("payOS callback: Order #%d not found", orderId);
-                return;
-            }
-            if (order.status != OrderStatus.PENDING) {
-                LOG.infof("payOS callback: Order #%d already processed (%s)", orderId, order.status);
-                return;
-            }
-
-            if ("PAID".equalsIgnoreCase(status)) {
-                order.status = OrderStatus.CONFIRMED;
-                LOG.infof("payOS callback: Order #%d payment confirmed", orderId);
-                return;
-            }
-
-            if ("CANCELLED".equalsIgnoreCase(status) || "EXPIRED".equalsIgnoreCase(status)) {
-                order.status = OrderStatus.CANCELLED;
-                restoreStock(order);
-                LOG.warnf("payOS callback: Order #%d cancelled, status=%s", orderId, status);
-            }
-        } catch (BadRequestException e) {
-            throw e;
-        } catch (Exception e) {
-            LOG.error("payOS sync payment status failed", e);
-            throw new BadRequestException("Khong the cap nhat trang thai payOS: " + e.getMessage());
+            Map<String, String> result = new HashMap<>();
+            result.put("checkoutUrl", data.path("checkoutUrl").asText(""));
+            result.put("paymentLinkId", data.path("paymentLinkId").asText(""));
+            result.put("qrCode", data.path("qrCode").asText(""));
+            result.put("orderId", String.valueOf(orderId));
+            result.put("amount", String.valueOf(amount));
+            return result;
+        } catch (BadRequestException e) { throw e; }
+        catch (Exception e) {
+            log.error("payOS payment creation failed", e);
+            throw new BadRequestException("Không thể tạo thanh toán payOS: " + e.getMessage());
         }
     }
 
     @Transactional
-    public void handleWebhook(Map<String, Object> body) {
-        Object data = body.get("data");
-        if (data == null) {
-            LOG.warnf("payOS webhook ignored: missing data, body=%s", body);
-            return;
-        }
-
-        JsonNode dataNode = MAPPER.valueToTree(data);
-        Long orderCode = dataNode.path("orderCode").asLong(0);
-        if (orderCode <= 0) {
-            LOG.warnf("payOS webhook ignored: invalid orderCode, body=%s", body);
-            return;
-        }
-
-        syncPaymentStatus(orderCode);
-    }
-
-    private HttpResponse<String> sendPost(String url, String body) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(20))
-                .header("x-client-id", clientId.trim())
-                .header("x-api-key", apiKey.trim())
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-        return HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
-    }
-
-    private Order findOrderForPayment(Long orderId) {
-        return Order.find(
-                "SELECT o FROM Order o LEFT JOIN FETCH o.items i LEFT JOIN FETCH i.sku WHERE o.id = ?1",
-                orderId
-        ).firstResult();
-    }
-
-    private void restoreStock(Order order) {
-        if (order.items == null) return;
-        for (var item : order.items) {
-            if (item.sku != null) {
-                Sku.restoreStock(item.sku.id, item.quantity);
+    public void handleWebhook(Map<String, Object> webhookData) {
+        try {
+            String code = String.valueOf(webhookData.getOrDefault("code", ""));
+            if (!"00".equals(code)) {
+                log.warn("payOS webhook: non-success code={}", code);
+                return;
             }
-        }
-    }
 
-    private String sign(Map<String, String> data) throws Exception {
-        StringBuilder raw = new StringBuilder();
-        for (Map.Entry<String, String> entry : data.entrySet()) {
-            if (!raw.isEmpty()) raw.append("&");
-            raw.append(entry.getKey()).append("=").append(entry.getValue());
-        }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) webhookData.get("data");
+            if (data == null) return;
 
-        Mac mac = Mac.getInstance("HmacSHA256");
-        mac.init(new SecretKeySpec(checksumKey.trim().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-        byte[] hash = mac.doFinal(raw.toString().getBytes(StandardCharsets.UTF_8));
+            long orderCode = ((Number) data.getOrDefault("orderCode", 0)).longValue();
+            String paymentStatus = String.valueOf(data.getOrDefault("code", data.getOrDefault("status", "")));
 
-        StringBuilder hex = new StringBuilder();
-        for (byte b : hash) {
-            hex.append(String.format("%02x", b));
+            Order order = orderRepository.findByIdWithItemsAndSkus(orderCode).orElse(null);
+            if (order == null) { log.warn("payOS webhook: Order #{} not found", orderCode); return; }
+            if (order.getStatus() != OrderStatus.PENDING) {
+                log.info("payOS webhook: Order #{} already processed (status: {})", orderCode, order.getStatus());
+                return;
+            }
+
+            if ("PAID".equalsIgnoreCase(paymentStatus) || "00".equals(paymentStatus)) {
+                order.setStatus(OrderStatus.CONFIRMED);
+                log.info("payOS webhook: Order #{} payment confirmed", orderCode);
+            } else {
+                order.setStatus(OrderStatus.CANCELLED);
+                if (order.getItems() != null) {
+                    for (var item : order.getItems()) {
+                        if (item.getSku() != null) {
+                            skuRepository.restoreStock(item.getSku().getId(), item.getQuantity());
+                        }
+                    }
+                }
+                log.warn("payOS webhook: Order #{} cancelled (status: {})", orderCode, paymentStatus);
+            }
+        } catch (Exception e) {
+            log.error("payOS webhook processing error", e);
         }
-        return hex.toString();
     }
 
     private void validateConfig() {
-        if (isBlank(apiUrl) || isBlank(clientId) || isBlank(apiKey)
-                || isBlank(checksumKey) || isBlank(returnUrl) || isBlank(cancelUrl)) {
-            throw new BadRequestException("Thieu cau hinh payOS");
+        if (clientId == null || clientId.isBlank() || apiKey == null || apiKey.isBlank()) {
+            throw new BadRequestException("Thiếu cấu hình payOS");
         }
     }
 
-    private boolean isBlank(String value) {
-        return value == null || value.isBlank();
+    private String hmacSHA256(String key, String data) throws Exception {
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) sb.append(String.format("%02x", b));
+        return sb.toString();
     }
 }

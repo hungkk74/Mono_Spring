@@ -16,15 +16,15 @@ public record OrderItemResponse(
 ) {
     public static OrderItemResponse from(OrderItem item) {
         return new OrderItemResponse(
-                item.id,
-                item.sku.id,
-                item.sku.skuCode,
-                item.sku.product.name,
-                item.sku.size,
-                item.sku.color,
-                item.quantity,
-                item.unitPrice,
-                item.subtotal
+                item.getId(),
+                item.getSku().getId(),
+                item.getSku().getSkuCode(),
+                item.getSku().getProduct().getName(),
+                item.getSku().getSize(),
+                item.getSku().getColor(),
+                item.getQuantity(),
+                item.getUnitPrice(),
+                item.getSubtotal()
         );
     }
 }

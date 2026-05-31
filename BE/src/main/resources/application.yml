@@ -1,0 +1,106 @@
+# ============================================================
+# Mono Wear API - Spring Boot Configuration
+# ============================================================
+
+# --- Server ---
+server:
+  port: 8080
+
+# --- Datasource (MySQL 8.x) ---
+spring:
+  config:
+    import: "optional:file:../.env[.properties]"
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+
+  # --- JPA / Hibernate ---
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        physical_naming_strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+
+  # --- Flyway ---
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    repair: true
+
+  # --- Jackson ---
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: false
+    serialization:
+      write-dates-as-timestamps: false
+
+# --- Logging ---
+logging:
+  level:
+    com.monowear: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level [%logger{2}] (%thread) %msg%n"
+  file:
+    name: application.log
+
+# --- JWT ---
+jwt:
+  private-key-path: classpath:privateKey.pem
+  public-key-path: classpath:publicKey.pem
+  issuer: https://monowear.io
+  expiration-seconds: ${JWT_EXPIRATION}
+
+# --- MoMo Payment ---
+momo:
+  partner-code: ${MOMO_PARTNER_CODE}
+  access-key: ${MOMO_ACCESS_KEY}
+  secret-key: ${MOMO_SECRET_KEY}
+  api-url: ${MOMO_API_URL}
+  redirect-url: ${MOMO_REDIRECT_URL}
+  ipn-url: ${MOMO_IPN_URL}
+
+# --- VietQR Bank Transfer ---
+vietqr:
+  api-url: ${VIETQR_API_URL}
+  banks-url: ${VIETQR_BANKS_URL}
+  lookup-url: ${VIETQR_LOOKUP_URL}
+  lookup-enabled: ${VIETQR_LOOKUP_ENABLED}
+  client-id: ${VIETQR_CLIENT_ID}
+  api-key: ${VIETQR_API_KEY}
+  account-no: ${VIETQR_ACCOUNT_NO}
+  account-name: ${VIETQR_ACCOUNT_NAME}
+  bank-code: ${VIETQR_BANK_CODE}
+  acq-id: ${VIETQR_ACQ_ID}
+  template: ${VIETQR_TEMPLATE}
+
+# --- payOS Bank QR Payment ---
+payos:
+  api-url: ${PAYOS_API_URL}
+  client-id: ${PAYOS_CLIENT_ID}
+  api-key: ${PAYOS_API_KEY}
+  checksum-key: ${PAYOS_CHECKSUM_KEY}
+  return-url: ${PAYOS_RETURN_URL}
+  cancel-url: ${PAYOS_CANCEL_URL}
+
+# --- Email (Resend) ---
+resend:
+  api-key: ${RESEND_API_KEY}
+  from-email: ${RESEND_FROM_EMAIL}
+  from-name: ${RESEND_FROM_NAME}
+
+# --- OpenRouter AI Chatbot ---
+openrouter:
+  api-key: ${OPENROUTER_API_KEY}
+  model: ${OPENROUTER_MODEL}
+  api-url: ${OPENROUTER_API_URL}

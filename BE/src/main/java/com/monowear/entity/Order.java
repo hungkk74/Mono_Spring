@@ -2,55 +2,60 @@ package com.monowear.entity;
 
 import com.monowear.entity.enums.OrderStatus;
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
 @Entity
 @Table(name = "orders")
-public class Order extends io.quarkus.hibernate.orm.panache.PanacheEntityBase {
+@Getter @Setter @NoArgsConstructor
+public class Order {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    public Long id;
+    private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
-    public User user;
+    private User user;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    public OrderStatus status = OrderStatus.PENDING;
+    private OrderStatus status = OrderStatus.PENDING;
 
     @Column(name = "subtotal_amount", nullable = false, precision = 15, scale = 2)
-    public BigDecimal subtotalAmount;
+    private BigDecimal subtotalAmount;
 
     @Column(name = "discount_amount", nullable = false, precision = 15, scale = 2)
-    public BigDecimal discountAmount = BigDecimal.ZERO;
+    private BigDecimal discountAmount = BigDecimal.ZERO;
 
     @Column(name = "coupon_code", length = 50)
-    public String couponCode;
+    private String couponCode;
 
     @Column(name = "total_amount", nullable = false, precision = 15, scale = 2)
-    public BigDecimal totalAmount;
+    private BigDecimal totalAmount;
 
     @Column(name = "shipping_address", nullable = false, columnDefinition = "TEXT")
-    public String shippingAddress;
+    private String shippingAddress;
 
     @Column(name = "payment_method", nullable = false, length = 50)
-    public String paymentMethod;
+    private String paymentMethod;
 
     @Version
-    public Integer version;
+    private Integer version;
 
     @OneToMany(mappedBy = "order", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
-    public List<OrderItem> items;
+    private List<OrderItem> items;
 
     @Column(name = "created_at", updatable = false)
-    public LocalDateTime createdAt;
+    private LocalDateTime createdAt;
 
     @Column(name = "updated_at")
-    public LocalDateTime updatedAt;
+    private LocalDateTime updatedAt;
 
     // --- Lifecycle Callbacks ---
 
@@ -63,19 +68,5 @@ public class Order extends io.quarkus.hibernate.orm.panache.PanacheEntityBase {
     @PreUpdate
     void onPreUpdate() {
         updatedAt = LocalDateTime.now();
-    }
-
-    // --- Query Methods ---
-
-    public static List<Order> listByUser(Long userId) {
-        return list("user.id = ?1 ORDER BY createdAt DESC", userId);
-    }
-
-    public static List<Order> listByStatus(OrderStatus status) {
-        return list("status", status);
-    }
-
-    public static long countByUserAndStatus(Long userId, OrderStatus status) {
-        return count("user.id = ?1 AND status = ?2", userId, status);
     }
 }

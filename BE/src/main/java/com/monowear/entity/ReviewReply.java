@@ -1,40 +1,37 @@
 package com.monowear.entity;
 
-import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import jakarta.persistence.*;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Entity
 @Table(name = "review_replies")
-public class ReviewReply extends PanacheEntityBase {
+@Getter @Setter @NoArgsConstructor
+public class ReviewReply {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    public Long id;
+    private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "review_id", nullable = false)
-    public Review review;
+    private Review review;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
-    public User user;
+    private User user;
 
     @Column(nullable = false, columnDefinition = "TEXT")
-    public String content;
+    private String content;
 
     @Column(name = "created_at", updatable = false)
-    public LocalDateTime createdAt;
+    private LocalDateTime createdAt;
 
     @PrePersist
     void onPrePersist() {
         createdAt = LocalDateTime.now();
-    }
-
-    // --- Query Methods ---
-
-    public static List<ReviewReply> listByReview(Long reviewId) {
-        return list("review.id = ?1 ORDER BY createdAt ASC", reviewId);
     }
 }

@@ -18,23 +18,23 @@ public record OrderTrackingResponse(
         LocalDateTime updatedAt
 ) {
     public static OrderTrackingResponse from(Order order) {
-        int itemCount = order.items == null
+        int itemCount = order.getItems() == null
                 ? 0
-                : order.items.stream()
-                        .mapToInt(item -> item.quantity == null ? 0 : item.quantity)
+                : order.getItems().stream()
+                        .mapToInt(item -> item.getQuantity() == null ? 0 : item.getQuantity())
                         .sum();
 
         return new OrderTrackingResponse(
-                order.id,
-                order.status,
-                order.subtotalAmount,
-                order.discountAmount,
-                order.couponCode,
-                order.totalAmount,
-                order.paymentMethod,
+                order.getId(),
+                order.getStatus(),
+                order.getSubtotalAmount(),
+                order.getDiscountAmount(),
+                order.getCouponCode(),
+                order.getTotalAmount(),
+                order.getPaymentMethod(),
                 itemCount,
-                order.createdAt,
-                order.updatedAt
+                order.getCreatedAt(),
+                order.getUpdatedAt()
         );
     }
 }

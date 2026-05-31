@@ -32,24 +32,24 @@ public record ProductResponse(
      */
     public static ProductResponse from(Product product) {
         return new ProductResponse(
-                product.id,
-                product.name,
-                product.slug,
-                product.material,
-                product.description,
-                product.imageUrl,
-                product.salePercent,
-                product.saleStartAt,
-                product.saleEndAt,
+                product.getId(),
+                product.getName(),
+                product.getSlug(),
+                product.getMaterial(),
+                product.getDescription(),
+                product.getImageUrl(),
+                product.getSalePercent(),
+                product.getSaleStartAt(),
+                product.getSaleEndAt(),
                 product.isOnSale(),
                 minActivePrice(product),
                 salePrice(product, minActivePrice(product)),
-                product.isActive,
-                product.category.id,
-                product.category.name,
+                product.getIsActive(),
+                product.getCategory().getId(),
+                product.getCategory().getName(),
                 null,
-                product.createdAt,
-                product.updatedAt
+                product.getCreatedAt(),
+                product.getUpdatedAt()
         );
     }
 
@@ -58,47 +58,47 @@ public record ProductResponse(
      */
     public static ProductResponse withSkus(Product product) {
         List<SkuResponse> skuList = null;
-        if (product.skus != null && !product.skus.isEmpty()) {
-            skuList = product.skus.stream()
-                    .filter(s -> s.isActive)
+        if (product.getSkus() != null && !product.getSkus().isEmpty()) {
+            skuList = product.getSkus().stream()
+                    .filter(s -> s.getIsActive())
                     .map(SkuResponse::from)
                     .toList();
         }
         return new ProductResponse(
-                product.id,
-                product.name,
-                product.slug,
-                product.material,
-                product.description,
-                product.imageUrl,
-                product.salePercent,
-                product.saleStartAt,
-                product.saleEndAt,
+                product.getId(),
+                product.getName(),
+                product.getSlug(),
+                product.getMaterial(),
+                product.getDescription(),
+                product.getImageUrl(),
+                product.getSalePercent(),
+                product.getSaleStartAt(),
+                product.getSaleEndAt(),
                 product.isOnSale(),
                 minActivePrice(product),
                 salePrice(product, minActivePrice(product)),
-                product.isActive,
-                product.category.id,
-                product.category.name,
+                product.getIsActive(),
+                product.getCategory().getId(),
+                product.getCategory().getName(),
                 skuList,
-                product.createdAt,
-                product.updatedAt
+                product.getCreatedAt(),
+                product.getUpdatedAt()
         );
     }
 
     private static BigDecimal minActivePrice(Product product) {
-        if (product.skus == null || product.skus.isEmpty()) return null;
-        return product.skus.stream()
-                .filter(sku -> Boolean.TRUE.equals(sku.isActive) && sku.price != null)
-                .min(Comparator.comparing(sku -> sku.price))
-                .map(sku -> sku.price)
+        if (product.getSkus() == null || product.getSkus().isEmpty()) return null;
+        return product.getSkus().stream()
+                .filter(sku -> Boolean.TRUE.equals(sku.getIsActive()) && sku.getPrice() != null)
+                .min(Comparator.comparing(sku -> sku.getPrice()))
+                .map(sku -> sku.getPrice())
                 .orElse(null);
     }
 
     private static BigDecimal salePrice(Product product, BigDecimal price) {
         if (price == null || !product.isOnSale()) return null;
         return price
-                .multiply(BigDecimal.valueOf(100L - product.salePercent))
+                .multiply(BigDecimal.valueOf(100L - product.getSalePercent()))
                 .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
     }
 }

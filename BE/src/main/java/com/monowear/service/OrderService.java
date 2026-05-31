@@ -7,23 +7,24 @@ import com.monowear.entity.enums.OrderStatus;
 import com.monowear.exception.BadRequestException;
 import com.monowear.exception.InsufficientStockException;
 import com.monowear.exception.ResourceNotFoundException;
-import io.quarkus.panache.common.Page;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
-import org.jboss.logging.Logger;
+import com.monowear.repository.OrderRepository;
+import com.monowear.repository.SkuRepository;
+import com.monowear.repository.UserRepository;
+import jakarta.persistence.EntityManager;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
-@ApplicationScoped
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class OrderService {
-
-    private static final Logger LOG = Logger.getLogger(OrderService.class);
 
     private static final Map<OrderStatus, Set<OrderStatus>> ALLOWED_TRANSITIONS = Map.of(
             OrderStatus.PENDING, Set.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED),
@@ -33,13 +34,16 @@ public class OrderService {
             OrderStatus.CANCELLED, Set.of()
     );
 
-    @Inject
-    CouponService couponService;
+    private final OrderRepository orderRepository;
+    private final SkuRepository skuRepository;
+    private final UserRepository userRepository;
+    private final CouponService couponService;
+    private final EntityManager em;
 
     @Transactional
     public OrderResponse placeOrder(Long userId, OrderRequest request) {
-        User user = User.findById(userId);
-        if (user == null || !user.isActive) {
+        User user = userRepository.findById(userId).orElse(null);
+        if (user == null || !user.getIsActive()) {
             throw new BadRequestException("Tai khoan khong hop le");
         }
 
@@ -47,32 +51,32 @@ public class OrderService {
         BigDecimal subtotalAmount = BigDecimal.ZERO;
 
         for (OrderItemRequest itemReq : request.items()) {
-            Sku sku = Sku.findById(itemReq.skuId());
-            if (sku == null || !sku.isActive) {
+            Sku sku = skuRepository.findById(itemReq.skuId()).orElse(null);
+            if (sku == null || !sku.getIsActive()) {
                 throw new ResourceNotFoundException("SKU", itemReq.skuId());
             }
 
-            if (sku.stock < itemReq.quantity()) {
-                throw new InsufficientStockException(sku.id, itemReq.quantity(), sku.stock);
+            if (sku.getStock() < itemReq.quantity()) {
+                throw new InsufficientStockException(sku.getId(), itemReq.quantity(), sku.getStock());
             }
 
-            int updated = Sku.deductStock(sku.id, itemReq.quantity(), sku.version);
+            int updated = skuRepository.deductStock(sku.getId(), itemReq.quantity());
             if (updated == 0) {
-                Sku refreshed = Sku.findById(sku.id);
-                int available = refreshed != null ? refreshed.stock : 0;
-                throw new InsufficientStockException(sku.id, itemReq.quantity(), available);
+                Sku refreshed = skuRepository.findById(sku.getId()).orElse(null);
+                int available = refreshed != null ? refreshed.getStock() : 0;
+                throw new InsufficientStockException(sku.getId(), itemReq.quantity(), available);
             }
 
             BigDecimal effectivePrice = getEffectivePrice(sku);
 
             OrderItem item = new OrderItem();
-            item.sku = sku;
-            item.quantity = itemReq.quantity();
-            item.unitPrice = effectivePrice;
-            item.subtotal = effectivePrice.multiply(BigDecimal.valueOf(itemReq.quantity()));
+            item.setSku(sku);
+            item.setQuantity(itemReq.quantity());
+            item.setUnitPrice(effectivePrice);
+            item.setSubtotal(effectivePrice.multiply(BigDecimal.valueOf(itemReq.quantity())));
             orderItems.add(item);
 
-            subtotalAmount = subtotalAmount.add(item.subtotal);
+            subtotalAmount = subtotalAmount.add(item.getSubtotal());
         }
 
         BigDecimal discountAmount = BigDecimal.ZERO;
@@ -87,96 +91,76 @@ public class OrderService {
         }
 
         Order order = new Order();
-        order.user = user;
-        order.status = OrderStatus.PENDING;
-        order.subtotalAmount = subtotalAmount;
-        order.discountAmount = discountAmount;
-        order.couponCode = couponCode;
-        order.totalAmount = totalAmount;
-        order.shippingAddress = request.shippingAddress().trim();
-        order.paymentMethod = request.paymentMethod().trim();
-        order.persist();
+        order.setUser(user);
+        order.setStatus(OrderStatus.PENDING);
+        order.setSubtotalAmount(subtotalAmount);
+        order.setDiscountAmount(discountAmount);
+        order.setCouponCode(couponCode);
+        order.setTotalAmount(totalAmount);
+        order.setShippingAddress(request.shippingAddress().trim());
+        order.setPaymentMethod(request.paymentMethod().trim());
+        orderRepository.save(order);
 
         for (OrderItem item : orderItems) {
-            item.order = order;
-            item.persist();
+            item.setOrder(order);
         }
-        order.items = orderItems;
+        order.setItems(orderItems);
+        orderRepository.save(order);
 
-        LOG.infof("Order placed: #%d by User %d | Subtotal: %s | Discount: %s | Total: %s | Items: %d",
-                order.id, userId, subtotalAmount, discountAmount, totalAmount, orderItems.size());
+        log.info("Order placed: #{} by User {} | Subtotal: {} | Discount: {} | Total: {} | Items: {}",
+                order.getId(), userId, subtotalAmount, discountAmount, totalAmount, orderItems.size());
 
         return OrderResponse.withItems(order);
     }
 
     public PagedResponse<OrderResponse> listByUser(Long userId, int page, int size) {
-        long total = Order.count("user.id", userId);
+        long total = orderRepository.countByUserId(userId);
 
-        // Bước 1: Lấy IDs phân trang (tránh Hibernate in-memory pagination khi JOIN FETCH)
-        @SuppressWarnings("unchecked")
-        List<Long> ids = Order.getEntityManager()
-                .createQuery("SELECT o.id FROM Order o WHERE o.user.id = :uid ORDER BY o.createdAt DESC")
+        List<Long> ids = em.createQuery("SELECT o.id FROM Order o WHERE o.user.id = :uid ORDER BY o.createdAt DESC", Long.class)
                 .setParameter("uid", userId)
                 .setFirstResult(page * size)
                 .setMaxResults(size)
                 .getResultList();
 
-        if (ids.isEmpty()) {
-            return PagedResponse.of(List.of(), page, size, total);
-        }
+        if (ids.isEmpty()) return PagedResponse.of(List.of(), page, size, total);
 
-        // Bước 2: Fetch đầy đủ với JOIN FETCH (không pagination → không warning)
-        List<OrderResponse> items = Order.find(
-                "SELECT DISTINCT o FROM Order o " +
-                "JOIN FETCH o.user " +
-                "LEFT JOIN FETCH o.items i " +
-                "LEFT JOIN FETCH i.sku s " +
-                "LEFT JOIN FETCH s.product " +
-                "WHERE o.id IN ?1 ORDER BY o.createdAt DESC", ids)
-                .list()
-                .stream()
-                .map(e -> OrderResponse.withItems((Order) e))
-                .toList();
+        List<OrderResponse> items = orderRepository.findAllWithDetailsByIds(ids)
+                .stream().map(OrderResponse::withItems).toList();
         return PagedResponse.of(items, page, size, total);
     }
 
     public OrderResponse getByIdForUser(Long orderId, Long userId) {
         Order order = findOrThrow(orderId);
-        if (!order.user.id.equals(userId)) {
+        if (!order.getUser().getId().equals(userId)) {
             throw new BadRequestException("Ban khong co quyen xem don hang nay");
         }
         return OrderResponse.withItems(order);
     }
 
     public OrderTrackingResponse getTrackingById(Long orderId) {
-        Order order = Order.find(
-                "SELECT DISTINCT o FROM Order o " +
-                "LEFT JOIN FETCH o.items " +
-                "WHERE o.id = ?1", orderId).firstResult();
-        if (order == null) {
-            throw new ResourceNotFoundException("Don hang", orderId);
-        }
+        Order order = orderRepository.findByIdWithItems(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Don hang", orderId));
         return OrderTrackingResponse.from(order);
     }
 
     @Transactional
     public OrderResponse cancelOrder(Long orderId, Long userId) {
         Order order = findOrThrow(orderId);
-        if (!order.user.id.equals(userId)) {
+        if (!order.getUser().getId().equals(userId)) {
             throw new BadRequestException("Ban khong co quyen huy don hang nay");
         }
-        if (order.status != OrderStatus.PENDING) {
+        if (order.getStatus() != OrderStatus.PENDING) {
             throw new BadRequestException("Chi co the huy don hang o trang thai PENDING");
         }
 
         restoreStock(order);
-        order.status = OrderStatus.CANCELLED;
-        LOG.infof("Order #%d cancelled by User %d", orderId, userId);
+        order.setStatus(OrderStatus.CANCELLED);
+        log.info("Order #{} cancelled by User {}", orderId, userId);
         return OrderResponse.withItems(order);
     }
 
     public PagedResponse<OrderResponse> listAll(int page, int size, OrderStatus status, String search) {
-        var params = new java.util.HashMap<String, Object>();
+        var params = new HashMap<String, Object>();
         String whereClause = "WHERE 1=1";
 
         if (status != null) {
@@ -195,41 +179,22 @@ public class OrderService {
             }
         }
 
-        // Step 1: Count
         String countHql = "SELECT COUNT(o) FROM Order o " + whereClause;
-        var countQuery = Order.getEntityManager().createQuery(countHql, Long.class);
+        var countQuery = em.createQuery(countHql, Long.class);
         params.forEach(countQuery::setParameter);
         long total = countQuery.getSingleResult();
 
-        if (total == 0) {
-            return PagedResponse.of(List.of(), page, size, 0);
-        }
+        if (total == 0) return PagedResponse.of(List.of(), page, size, 0);
 
-        // Step 2: Fetch paginated IDs (avoids in-memory pagination with JOIN FETCH)
         String idHql = "SELECT o.id FROM Order o " + whereClause + " ORDER BY o.createdAt DESC";
-        var idQuery = Order.getEntityManager().createQuery(idHql, Long.class);
+        var idQuery = em.createQuery(idHql, Long.class);
         params.forEach(idQuery::setParameter);
-        List<Long> ids = idQuery
-                .setFirstResult(page * size)
-                .setMaxResults(size)
-                .getResultList();
+        List<Long> ids = idQuery.setFirstResult(page * size).setMaxResults(size).getResultList();
 
-        if (ids.isEmpty()) {
-            return PagedResponse.of(List.of(), page, size, total);
-        }
+        if (ids.isEmpty()) return PagedResponse.of(List.of(), page, size, total);
 
-        // Step 3: Fetch full entities by IDs with JOIN FETCH
-        List<OrderResponse> items = Order.find(
-                "SELECT DISTINCT o FROM Order o " +
-                "JOIN FETCH o.user " +
-                "LEFT JOIN FETCH o.items i " +
-                "LEFT JOIN FETCH i.sku s " +
-                "LEFT JOIN FETCH s.product " +
-                "WHERE o.id IN ?1 ORDER BY o.createdAt DESC", ids)
-                .list()
-                .stream()
-                .map(e -> OrderResponse.withItems((Order) e))
-                .toList();
+        List<OrderResponse> items = orderRepository.findAllWithDetailsByIds(ids)
+                .stream().map(OrderResponse::withItems).toList();
         return PagedResponse.of(items, page, size, total);
     }
 
@@ -241,8 +206,7 @@ public class OrderService {
     @Transactional
     public OrderResponse updateStatus(Long orderId, UpdateOrderStatusRequest request) {
         Order order = findOrThrow(orderId);
-
-        OrderStatus currentStatus = order.status;
+        OrderStatus currentStatus = order.getStatus();
         OrderStatus newStatus = request.status();
 
         Set<OrderStatus> allowed = ALLOWED_TRANSITIONS.getOrDefault(currentStatus, Set.of());
@@ -254,8 +218,8 @@ public class OrderService {
         }
 
         if (newStatus == OrderStatus.CONFIRMED && currentStatus == OrderStatus.PENDING) {
-            if ("MOMO".equalsIgnoreCase(order.paymentMethod)
-                    || "BANK_TRANSFER".equalsIgnoreCase(order.paymentMethod)) {
+            if ("MOMO".equalsIgnoreCase(order.getPaymentMethod())
+                    || "BANK_TRANSFER".equalsIgnoreCase(order.getPaymentMethod())) {
                 throw new BadRequestException("Khong the xac nhan thu cong don hang chua thanh toan qua cong thanh toan.", "PAYMENT_REQUIRED");
             }
         }
@@ -264,95 +228,81 @@ public class OrderService {
             restoreStock(order);
         }
 
-        order.status = newStatus;
-        LOG.infof("Order #%d status: %s -> %s", orderId, currentStatus, newStatus);
+        order.setStatus(newStatus);
+        log.info("Order #{} status: {} -> {}", orderId, currentStatus, newStatus);
         return OrderResponse.withItems(order);
     }
 
     private Order findOrThrow(Long id) {
-        Order order = Order.find(
-                "SELECT o FROM Order o " +
-                "LEFT JOIN FETCH o.items i " +
-                "LEFT JOIN FETCH i.sku s " +
-                "LEFT JOIN FETCH s.product " +
-                "JOIN FETCH o.user " +
-                "WHERE o.id = ?1", id).firstResult();
-        if (order == null) {
-            throw new ResourceNotFoundException("Don hang", id);
-        }
-        return order;
+        return orderRepository.findByIdWithDetails(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Don hang", id));
     }
 
     private BigDecimal getEffectivePrice(Sku sku) {
-        if (sku.product != null && sku.product.isOnSale()) {
-            return sku.price
-                    .multiply(BigDecimal.valueOf(100L - sku.product.salePercent))
+        if (sku.getProduct() != null && sku.getProduct().isOnSale()) {
+            return sku.getPrice()
+                    .multiply(BigDecimal.valueOf(100L - sku.getProduct().getSalePercent()))
                     .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
         }
-        return sku.price;
+        return sku.getPrice();
     }
 
     private void restoreStock(Order order) {
-        for (OrderItem item : order.items) {
-            int updated = Sku.restoreStock(item.sku.id, item.quantity);
+        for (OrderItem item : order.getItems()) {
+            int updated = skuRepository.restoreStock(item.getSku().getId(), item.getQuantity());
             if (updated > 0) {
-                LOG.infof("Stock restored: SKU ID %d +%d", item.sku.id, item.quantity);
+                log.info("Stock restored: SKU ID {} +{}", item.getSku().getId(), item.getQuantity());
             }
         }
     }
 
-    /**
-     * Reorder: validate each item's SKU for availability, stock, and fetch current price.
-     */
     public List<ReorderItemResponse> getReorderItems(Long orderId, Long userId) {
         Order order = findOrThrow(orderId);
-        if (!order.user.id.equals(userId)) {
+        if (!order.getUser().getId().equals(userId)) {
             throw new BadRequestException("Ban khong co quyen thao tac don hang nay");
         }
 
         Set<OrderStatus> allowedStatuses = Set.of(OrderStatus.DELIVERED, OrderStatus.CANCELLED);
-        if (!allowedStatuses.contains(order.status)) {
+        if (!allowedStatuses.contains(order.getStatus())) {
             throw new BadRequestException("Chi co the mua lai don hang da giao hoac da huy");
         }
 
-        // Batch load tất cả SKUs trong 1 query thay vì N+1
-        Set<Long> skuIds = order.items.stream().map(i -> i.sku.id).collect(java.util.stream.Collectors.toSet());
+        Set<Long> skuIds = order.getItems().stream().map(i -> i.getSku().getId()).collect(Collectors.toSet());
         @SuppressWarnings("unchecked")
-        List<Sku> skuList = Sku.getEntityManager()
-                .createQuery("SELECT s FROM Sku s JOIN FETCH s.product WHERE s.id IN :ids")
+        List<Sku> skuList = em.createQuery("SELECT s FROM Sku s JOIN FETCH s.product WHERE s.id IN :ids")
                 .setParameter("ids", skuIds)
                 .getResultList();
-        Map<Long, Sku> skuMap = skuList.stream().collect(java.util.stream.Collectors.toMap(s -> s.id, s -> s));
+        Map<Long, Sku> skuMap = skuList.stream().collect(Collectors.toMap(Sku::getId, s -> s));
 
-        return order.items.stream().map(item -> {
-            Sku sku = skuMap.get(item.sku.id);
-            if (sku == null || !sku.isActive || sku.product == null || !sku.product.isActive) {
+        return order.getItems().stream().map(item -> {
+            Sku sku = skuMap.get(item.getSku().getId());
+            if (sku == null || !sku.getIsActive() || sku.getProduct() == null || !sku.getProduct().getIsActive()) {
                 return new ReorderItemResponse(
-                        item.sku.id, item.sku.skuCode,
-                        item.sku.product != null ? item.sku.product.name : "San pham",
-                        item.sku.product != null ? item.sku.product.slug : null,
-                        item.sku.product != null ? item.sku.product.imageUrl : null,
-                        item.sku.size, item.sku.color,
+                        item.getSku().getId(), item.getSku().getSkuCode(),
+                        item.getSku().getProduct() != null ? item.getSku().getProduct().getName() : "San pham",
+                        item.getSku().getProduct() != null ? item.getSku().getProduct().getSlug() : null,
+                        item.getSku().getProduct() != null ? item.getSku().getProduct().getImageUrl() : null,
+                        item.getSku().getSize(), item.getSku().getColor(),
                         null, null, 0, false, "San pham da ngung kinh doanh"
                 );
             }
 
-            BigDecimal currentPrice = sku.price;
+            BigDecimal currentPrice = sku.getPrice();
             BigDecimal salePrice = null;
-            if (sku.product.isOnSale()) {
+            if (sku.getProduct().isOnSale()) {
                 salePrice = currentPrice
-                        .multiply(BigDecimal.valueOf(100L - sku.product.salePercent))
+                        .multiply(BigDecimal.valueOf(100L - sku.getProduct().getSalePercent()))
                         .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
             }
 
-            boolean inStock = sku.stock > 0;
+            boolean inStock = sku.getStock() > 0;
             String reason = inStock ? null : "Het hang";
 
             return new ReorderItemResponse(
-                    sku.id, sku.skuCode,
-                    sku.product.name, sku.product.slug, sku.product.imageUrl,
-                    sku.size, sku.color,
-                    currentPrice, salePrice, sku.stock,
+                    sku.getId(), sku.getSkuCode(),
+                    sku.getProduct().getName(), sku.getProduct().getSlug(), sku.getProduct().getImageUrl(),
+                    sku.getSize(), sku.getColor(),
+                    currentPrice, salePrice, sku.getStock(),
                     inStock, reason
             );
         }).toList();

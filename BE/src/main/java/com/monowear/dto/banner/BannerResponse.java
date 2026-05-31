@@ -20,18 +20,18 @@ public record BannerResponse(
 ) {
     public static BannerResponse from(Banner banner) {
         return new BannerResponse(
-                banner.id,
-                banner.title,
-                banner.subtitle,
-                banner.mediaUrl,
-                banner.mediaType != null ? banner.mediaType.name() : "IMAGE",
-                banner.thumbnailUrl,
-                banner.linkUrl,
-                banner.ctaText,
-                banner.displayOrder,
-                banner.isActive,
-                banner.createdAt,
-                banner.updatedAt
+                banner.getId(),
+                banner.getTitle(),
+                banner.getSubtitle(),
+                banner.getMediaUrl(),
+                banner.getMediaType() != null ? banner.getMediaType().name() : "IMAGE",
+                banner.getThumbnailUrl(),
+                banner.getLinkUrl(),
+                banner.getCtaText(),
+                banner.getDisplayOrder(),
+                banner.getIsActive(),
+                banner.getCreatedAt(),
+                banner.getUpdatedAt()
         );
     }
 }

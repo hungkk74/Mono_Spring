@@ -5,127 +5,100 @@ import com.monowear.dto.banner.BannerResponse;
 import com.monowear.dto.common.PagedResponse;
 import com.monowear.entity.Banner;
 import com.monowear.exception.ResourceNotFoundException;
-import io.quarkus.panache.common.Page;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.transaction.Transactional;
-import org.jboss.logging.Logger;
+import com.monowear.repository.BannerRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
-@ApplicationScoped
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class BannerService {
 
-    private static final Logger LOG = Logger.getLogger(BannerService.class);
+    private final BannerRepository bannerRepository;
 
-    // ==================== ADMIN ====================
-
-    /**
-     * Lấy tất cả banner active, phân trang.
-     */
     public PagedResponse<BannerResponse> listAll(int page, int size) {
-        var query = Banner.find("isActive = true ORDER BY displayOrder ASC");
-        long total = Banner.count("isActive", true);
-        List<BannerResponse> items = query
-                .page(Page.of(page, size))
-                .list()
+        long total = bannerRepository.countByIsActiveTrue();
+        List<BannerResponse> items = bannerRepository
+                .findByIsActiveTrueOrderByDisplayOrderAsc()
                 .stream()
-                .map(e -> BannerResponse.from((Banner) e))
+                .skip((long) page * size)
+                .limit(size)
+                .map(BannerResponse::from)
                 .toList();
         return PagedResponse.of(items, page, size, total);
     }
 
-    /**
-     * Lấy chi tiết banner theo ID.
-     */
     public BannerResponse getById(Long id) {
         return BannerResponse.from(findOrThrow(id));
     }
 
-    /**
-     * Tạo banner mới.
-     */
     @Transactional
     public BannerResponse create(BannerRequest request) {
         Banner banner = new Banner();
-        banner.title = request.title().trim();
-        banner.subtitle = request.subtitle();
-        banner.mediaUrl = request.mediaUrl().trim();
-        banner.mediaType = request.mediaType();
-        banner.thumbnailUrl = request.thumbnailUrl();
-        banner.linkUrl = request.linkUrl();
-        banner.ctaText = request.ctaText();
-        banner.displayOrder = request.displayOrder() != null
+        banner.setTitle(request.title().trim());
+        banner.setSubtitle(request.subtitle());
+        banner.setMediaUrl(request.mediaUrl().trim());
+        banner.setMediaType(request.mediaType());
+        banner.setThumbnailUrl(request.thumbnailUrl());
+        banner.setLinkUrl(request.linkUrl());
+        banner.setCtaText(request.ctaText());
+        banner.setDisplayOrder(request.displayOrder() != null
                 ? request.displayOrder()
-                : Banner.maxDisplayOrder() + 1;
-        banner.isActive = true;
+                : bannerRepository.findMaxDisplayOrder() + 1);
+        banner.setIsActive(true);
 
-        banner.persist();
-        LOG.infof("Banner created: %s (ID: %d, type: %s)", banner.title, banner.id, banner.mediaType);
+        bannerRepository.save(banner);
+        log.info("Banner created: {} (ID: {}, type: {})", banner.getTitle(), banner.getId(), banner.getMediaType());
         return BannerResponse.from(banner);
     }
 
-    /**
-     * Cập nhật banner.
-     */
     @Transactional
     public BannerResponse update(Long id, BannerRequest request) {
         Banner banner = findOrThrow(id);
-        banner.title = request.title().trim();
-        banner.subtitle = request.subtitle();
-        banner.mediaUrl = request.mediaUrl().trim();
-        banner.mediaType = request.mediaType();
-        banner.thumbnailUrl = request.thumbnailUrl();
-        banner.linkUrl = request.linkUrl();
-        banner.ctaText = request.ctaText();
+        banner.setTitle(request.title().trim());
+        banner.setSubtitle(request.subtitle());
+        banner.setMediaUrl(request.mediaUrl().trim());
+        banner.setMediaType(request.mediaType());
+        banner.setThumbnailUrl(request.thumbnailUrl());
+        banner.setLinkUrl(request.linkUrl());
+        banner.setCtaText(request.ctaText());
         if (request.displayOrder() != null) {
-            banner.displayOrder = request.displayOrder();
+            banner.setDisplayOrder(request.displayOrder());
         }
 
-        LOG.infof("Banner updated: %s (ID: %d)", banner.title, banner.id);
+        log.info("Banner updated: {} (ID: {})", banner.getTitle(), banner.getId());
         return BannerResponse.from(banner);
     }
 
-    /**
-     * Soft delete banner.
-     */
     @Transactional
     public void delete(Long id) {
         Banner banner = findOrThrow(id);
-        banner.isActive = false;
-        LOG.infof("Banner soft-deleted: %s (ID: %d)", banner.title, banner.id);
+        banner.setIsActive(false);
+        log.info("Banner soft-deleted: {} (ID: {})", banner.getTitle(), banner.getId());
     }
 
-    /**
-     * Sắp xếp lại thứ tự hiển thị banner.
-     */
     @Transactional
     public void reorder(List<Long> ids) {
         for (int i = 0; i < ids.size(); i++) {
             Banner banner = findOrThrow(ids.get(i));
-            banner.displayOrder = i + 1;
+            banner.setDisplayOrder(i + 1);
         }
-        LOG.infof("Banner reordered: %d items", ids.size());
+        log.info("Banner reordered: {} items", ids.size());
     }
 
-    // ==================== PUBLIC ====================
-
-    /**
-     * Lấy danh sách banner active (sắp theo displayOrder).
-     */
     public List<BannerResponse> listActive() {
-        return Banner.listActiveOrdered()
-                .stream()
-                .map(BannerResponse::from)
-                .toList();
+        return bannerRepository.findByIsActiveTrueOrderByDisplayOrderAsc()
+                .stream().map(BannerResponse::from).toList();
     }
-
-    // ==================== HELPERS ====================
 
     private Banner findOrThrow(Long id) {
-        Banner banner = Banner.findById(id);
-        if (banner == null) {
-            throw new ResourceNotFoundException("Banner", id);
-        }
-        return banner;
+        return bannerRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Banner", id));
     }
 }

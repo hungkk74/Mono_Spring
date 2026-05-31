@@ -1,108 +1,87 @@
 package com.monowear.service;
 
+import com.monowear.config.JwtService;
 import com.monowear.dto.auth.*;
 import com.monowear.entity.User;
 import com.monowear.entity.enums.UserRole;
 import com.monowear.exception.BadRequestException;
 import com.monowear.exception.DuplicateResourceException;
-import io.smallrye.jwt.build.Jwt;
-import io.smallrye.jwt.auth.principal.JWTParser;
-import org.eclipse.microprofile.jwt.JsonWebToken;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
-import org.wildfly.security.password.Password;
-import org.wildfly.security.password.PasswordFactory;
-import org.wildfly.security.password.interfaces.BCryptPassword;
-import org.wildfly.security.password.util.ModularCrypt;
+import com.monowear.repository.UserRepository;
+import io.jsonwebtoken.Claims;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
-import java.util.Set;
-import java.util.UUID;
-
-@ApplicationScoped
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class AuthService {
 
-    private static final Logger LOG = Logger.getLogger(AuthService.class);
     private static final int OTP_TTL_MINUTES = 5;
-    private static final long RESET_TOKEN_LIFESPAN = 900L; // 15 phút
+    private static final long RESET_TOKEN_LIFESPAN = 900L; // 15 minutes
     private static final String RESET_PURPOSE_CLAIM = "password_reset";
 
-    @ConfigProperty(name = "smallrye.jwt.new-token.lifespan", defaultValue = "86400")
-    long tokenLifespan;
-
-    @ConfigProperty(name = "mp.jwt.verify.issuer", defaultValue = "https://monowear.io")
-    String issuer;
-
-    @Inject
-    OtpStore otpStore;
-
-    @Inject
-    ResetTokenBlacklist resetTokenBlacklist;
-
-    @Inject
-    EmailService emailService;
-
-    @Inject
-    JWTParser jwtParser;
+    private final UserRepository userRepository;
+    private final JwtService jwtService;
+    private final PasswordEncoder passwordEncoder;
+    private final OtpStore otpStore;
+    private final ResetTokenBlacklist resetTokenBlacklist;
+    private final EmailService emailService;
 
     /**
      * Đăng ký tài khoản mới (CUSTOMER).
      */
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        // Check duplicate email
-        if (User.findByEmail(request.email()).isPresent()) {
+        if (userRepository.findByEmail(request.email().trim().toLowerCase()).isPresent()) {
             throw new DuplicateResourceException("Email [" + request.email() + "] đã được sử dụng");
         }
 
-        // Create user
         User user = new User();
-        user.email = request.email().trim().toLowerCase();
-        user.passwordHash = hashPassword(request.password());
-        user.role = UserRole.CUSTOMER;
-        user.fullName = request.fullName().trim();
-        user.phoneNumber = request.phoneNumber();
-        user.address = request.address();
-        user.isActive = true;
-        user.persist();
+        user.setEmail(request.email().trim().toLowerCase());
+        user.setPasswordHash(passwordEncoder.encode(request.password()));
+        user.setRole(UserRole.CUSTOMER);
+        user.setFullName(request.fullName().trim());
+        user.setPhoneNumber(request.phoneNumber());
+        user.setAddress(request.address());
+        user.setIsActive(true);
+        userRepository.save(user);
 
-        LOG.infof("User registered: %s (ID: %d)", user.email, user.id);
+        log.info("User registered: {} (ID: {})", user.getEmail(), user.getId());
 
-        // Generate token & return
         String token = generateToken(user);
-        return AuthResponse.of(token, tokenLifespan, UserResponse.from(user));
+        return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserResponse.from(user));
     }
 
     /**
      * Đăng nhập bằng email + password.
      */
     public AuthResponse login(LoginRequest request) {
-        User user = User.findByEmail(request.email().trim().toLowerCase())
+        User user = userRepository.findByEmail(request.email().trim().toLowerCase())
                 .orElseThrow(() -> new BadRequestException("Email hoặc mật khẩu không đúng", "INVALID_CREDENTIALS"));
 
-        if (!user.isActive) {
+        if (!user.getIsActive()) {
             throw new BadRequestException("Tài khoản đã bị vô hiệu hóa", "ACCOUNT_DISABLED");
         }
 
-        if (!verifyPassword(request.password(), user.passwordHash)) {
+        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new BadRequestException("Email hoặc mật khẩu không đúng", "INVALID_CREDENTIALS");
         }
 
-        LOG.infof("User logged in: %s (ID: %d)", user.email, user.id);
+        log.info("User logged in: {} (ID: {})", user.getEmail(), user.getId());
 
         String token = generateToken(user);
-        return AuthResponse.of(token, tokenLifespan, UserResponse.from(user));
+        return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserResponse.from(user));
     }
 
     /**
      * Lấy thông tin user hiện tại từ JWT subject (userId).
      */
     public UserResponse getCurrentUser(String userId) {
-        User user = User.findById(Long.parseLong(userId));
-        if (user == null || !user.isActive) {
+        User user = userRepository.findById(Long.parseLong(userId)).orElse(null);
+        if (user == null || !user.getIsActive()) {
             throw new BadRequestException("Tài khoản không tồn tại hoặc đã bị vô hiệu hóa");
         }
         return UserResponse.from(user);
@@ -113,22 +92,22 @@ public class AuthService {
      */
     @Transactional
     public UserResponse updateProfile(String userId, UpdateProfileRequest request) {
-        User user = User.findById(Long.parseLong(userId));
-        if (user == null || !user.isActive) {
+        User user = userRepository.findById(Long.parseLong(userId)).orElse(null);
+        if (user == null || !user.getIsActive()) {
             throw new BadRequestException("Tài khoản không tồn tại hoặc đã bị vô hiệu hóa");
         }
 
         if (request.fullName() != null && !request.fullName().isBlank()) {
-            user.fullName = request.fullName().trim();
+            user.setFullName(request.fullName().trim());
         }
         if (request.phoneNumber() != null) {
-            user.phoneNumber = request.phoneNumber().trim();
+            user.setPhoneNumber(request.phoneNumber().trim());
         }
         if (request.address() != null) {
-            user.address = request.address().trim();
+            user.setAddress(request.address().trim());
         }
 
-        LOG.infof("Profile updated for User %d", user.id);
+        log.info("Profile updated for User {}", user.getId());
         return UserResponse.from(user);
     }
 
@@ -136,20 +115,18 @@ public class AuthService {
 
     /**
      * Bước 1: Sinh OTP 6 số, lưu in-memory (TTL 5 phút), gửi email qua Resend.
-     * Nếu email không tồn tại → vẫn trả về thành công (tránh email enumeration).
      */
     public void requestOtp(String email) {
         String normalized = email.trim().toLowerCase();
-        User user = User.findByEmail(normalized).orElse(null);
-        if (user == null || !user.isActive) {
-            // Không tiết lộ email có tồn tại hay không
-            LOG.warnf("OTP requested for unknown/inactive email: %s", normalized);
+        User user = userRepository.findByEmail(normalized).orElse(null);
+        if (user == null || !user.getIsActive()) {
+            log.warn("OTP requested for unknown/inactive email: {}", normalized);
             return;
         }
         String otp = generateOtp();
         otpStore.save(normalized, otp, OTP_TTL_MINUTES);
-        emailService.sendOtpEmail(normalized, user.fullName, otp, OTP_TTL_MINUTES);
-        LOG.infof("OTP sent to %s", normalized);
+        emailService.sendOtpEmail(normalized, user.getFullName(), otp, OTP_TTL_MINUTES);
+        log.info("OTP sent to {}", normalized);
     }
 
     /**
@@ -160,22 +137,14 @@ public class AuthService {
         if (!otpStore.verify(normalized, code)) {
             throw new BadRequestException("Mã OTP không hợp lệ hoặc đã hết hạn", "OTP_INVALID");
         }
-        // Single-use: xóa ngay sau khi xác thực thành công
         otpStore.remove(normalized);
 
-        User user = User.findByEmail(normalized)
+        User user = userRepository.findByEmail(normalized)
                 .orElseThrow(() -> new BadRequestException("Tài khoản không tồn tại"));
 
-        String jti = UUID.randomUUID().toString();
-        String resetToken = Jwt.issuer(issuer)
-                .subject(String.valueOf(user.id))
-                .claim("jti", jti)
-                .claim("purpose", RESET_PURPOSE_CLAIM)
-                .claim("email", normalized)
-                .expiresIn(Duration.ofSeconds(RESET_TOKEN_LIFESPAN))
-                .sign();
+        String resetToken = jwtService.generateResetToken(user.getId(), normalized, RESET_TOKEN_LIFESPAN);
 
-        LOG.infof("Reset token issued for user %d (jti: %s)", user.id, jti);
+        log.info("Reset token issued for user {}", user.getId());
         return ResetTokenResponse.of(resetToken, RESET_TOKEN_LIFESPAN);
     }
 
@@ -185,108 +154,51 @@ public class AuthService {
     @Transactional
     public void resetPassword(String resetToken, String newPassword) {
         try {
-            // Verify signature & parse JWT using SmallRye JWTParser
-            JsonWebToken jwt = jwtParser.parse(resetToken);
+            Claims claims = jwtService.parseToken(resetToken);
 
-            String purpose = jwt.getClaim("purpose");
+            String purpose = claims.get("purpose", String.class);
             if (!RESET_PURPOSE_CLAIM.equals(purpose)) {
                 throw new BadRequestException("Reset token không hợp lệ", "RESET_TOKEN_INVALID");
             }
 
-            String jti = jwt.getClaim("jti");
+            String jti = claims.getId();
             if (resetTokenBlacklist.isBlacklisted(jti)) {
                 throw new BadRequestException("Reset token đã được sử dụng", "RESET_TOKEN_USED");
             }
 
-            Long userId = Long.parseLong(jwt.getSubject());
-            User user = User.findById(userId);
-            if (user == null || !user.isActive) {
+            Long userId = Long.parseLong(claims.getSubject());
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null || !user.getIsActive()) {
                 throw new BadRequestException("Tài khoản không tồn tại hoặc đã bị vô hiệu hóa");
             }
 
-            user.passwordHash = hashPassword(newPassword);
+            user.setPasswordHash(passwordEncoder.encode(newPassword));
 
-            // Invalidate token immediately
-            long exp = jwt.getExpirationTime();
+            long exp = claims.getExpiration().getTime() / 1000;
             resetTokenBlacklist.invalidate(jti, exp);
 
-            LOG.infof("Password reset successful for user %d", userId);
+            log.info("Password reset successful for user {}", userId);
         } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
-            LOG.warnf("Failed to parse reset token: %s", e.getMessage());
+            log.warn("Failed to parse reset token: {}", e.getMessage());
             throw new BadRequestException("Reset token không hợp lệ hoặc đã hết hạn", "RESET_TOKEN_INVALID");
         }
     }
 
     // ===================== PRIVATE HELPERS =====================
 
-    /**
-     * Sinh JWT token chứa userId, email, role.
-     */
     private String generateToken(User user) {
-        return Jwt.issuer(issuer)
-                .subject(String.valueOf(user.id))
-                .upn(user.email)
-                .groups(Set.of(user.role.name()))
-                .expiresIn(Duration.ofSeconds(tokenLifespan))
-                .claim("full_name", user.fullName)
-                .sign();
+        return jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getFullName());
     }
 
     /**
-     * Public wrapper — dùng cho AdminUserResource tạo staff.
+     * Public wrapper — dùng cho UserService tạo staff.
      */
     public String hashPasswordPublic(String plainPassword) {
-        return hashPassword(plainPassword);
+        return passwordEncoder.encode(plainPassword);
     }
 
-    /**
-     * Hash password bằng BCrypt (Elytron).
-     */
-    private String hashPassword(String plainPassword) {
-        try {
-            PasswordFactory factory = PasswordFactory.getInstance(BCryptPassword.ALGORITHM_BCRYPT);
-            // Generate BCrypt hash with cost factor 10
-            org.wildfly.security.password.spec.IteratedSaltedPasswordAlgorithmSpec spec =
-                    new org.wildfly.security.password.spec.IteratedSaltedPasswordAlgorithmSpec(
-                            10, generateSalt());
-            org.wildfly.security.password.spec.EncryptablePasswordSpec encSpec =
-                    new org.wildfly.security.password.spec.EncryptablePasswordSpec(
-                            plainPassword.toCharArray(), spec);
-            BCryptPassword bcryptPwd = (BCryptPassword) factory.generatePassword(encSpec);
-            return ModularCrypt.encodeAsString(bcryptPwd);
-        } catch (Exception e) {
-            throw new RuntimeException("Lỗi mã hóa mật khẩu", e);
-        }
-    }
-
-    /**
-     * Verify password against BCrypt hash.
-     */
-    private boolean verifyPassword(String plainPassword, String hash) {
-        try {
-            PasswordFactory factory = PasswordFactory.getInstance(BCryptPassword.ALGORITHM_BCRYPT);
-            Password decoded = factory.translate(ModularCrypt.decode(hash));
-            return factory.verify(decoded, plainPassword.toCharArray());
-        } catch (Exception e) {
-            LOG.errorf(e, "Password verification failed");
-            return false;
-        }
-    }
-
-    /**
-     * Generate 16-byte random salt.
-     */
-    private byte[] generateSalt() {
-        byte[] salt = new byte[16];
-        new java.security.SecureRandom().nextBytes(salt);
-        return salt;
-    }
-
-    /**
-     * Sinh OTP 6 chữ số ngẫu nhiên.
-     */
     private String generateOtp() {
         int otp = new java.security.SecureRandom().nextInt(900000) + 100000;
         return String.valueOf(otp);

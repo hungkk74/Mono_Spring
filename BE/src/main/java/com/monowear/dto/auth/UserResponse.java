@@ -19,14 +19,14 @@ public record UserResponse(
 ) {
     public static UserResponse from(User user) {
         return new UserResponse(
-                user.id,
-                user.email,
-                user.role,
-                user.fullName,
-                user.phoneNumber,
-                user.address,
-                user.isActive,
-                user.createdAt
+                user.getId(),
+                user.getEmail(),
+                user.getRole(),
+                user.getFullName(),
+                user.getPhoneNumber(),
+                user.getAddress(),
+                user.getIsActive(),
+                user.getCreatedAt()
         );
     }
 }

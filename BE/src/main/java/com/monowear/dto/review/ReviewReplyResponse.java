@@ -14,13 +14,13 @@ public record ReviewReplyResponse(
 ) {
     public static ReviewReplyResponse from(ReviewReply reply) {
         return new ReviewReplyResponse(
-                reply.id,
-                reply.review.id,
-                reply.user.id,
-                reply.user.fullName,
-                reply.user.role.name(),
-                reply.content,
-                reply.createdAt
+                reply.getId(),
+                reply.getReview().getId(),
+                reply.getUser().getId(),
+                reply.getUser().getFullName(),
+                reply.getUser().getRole().name(),
+                reply.getContent(),
+                reply.getCreatedAt()
         );
     }
 }

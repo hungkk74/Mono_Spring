@@ -3,14 +3,14 @@ package com.monowear.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monowear.entity.Order;
-import com.monowear.entity.Sku;
 import com.monowear.entity.enums.OrderStatus;
 import com.monowear.exception.BadRequestException;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.transaction.Transactional;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
-import org.jboss.logging.Logger;
-import java.util.Map;
+import com.monowear.repository.OrderRepository;
+import com.monowear.repository.SkuRepository;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -19,43 +19,35 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
-@ApplicationScoped
+@Service
+@Slf4j
 public class MomoService {
 
-    private static final Logger LOG = Logger.getLogger(MomoService.class);
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    @ConfigProperty(name = "momo.partner-code")
-    String partnerCode;
+    private final OrderRepository orderRepository;
+    private final SkuRepository skuRepository;
 
-    @ConfigProperty(name = "momo.access-key")
-    String accessKey;
+    @Value("${momo.partner-code}") private String partnerCode;
+    @Value("${momo.access-key}") private String accessKey;
+    @Value("${momo.secret-key}") private String secretKey;
+    @Value("${momo.api-url}") private String apiUrl;
+    @Value("${momo.redirect-url}") private String redirectUrl;
+    @Value("${momo.ipn-url}") private String ipnUrl;
 
-    @ConfigProperty(name = "momo.secret-key")
-    String secretKey;
+    public MomoService(OrderRepository orderRepository, SkuRepository skuRepository) {
+        this.orderRepository = orderRepository;
+        this.skuRepository = skuRepository;
+    }
 
-    @ConfigProperty(name = "momo.api-url")
-    String apiUrl;
-
-    @ConfigProperty(name = "momo.redirect-url")
-    String redirectUrl;
-
-    @ConfigProperty(name = "momo.ipn-url")
-    String ipnUrl;
-
-    /**
-     * Tạo yêu cầu thanh toán MoMo cho đơn hàng.
-     * @param requestType — "payWithMethod" (QR), "payWithATM" (ATM), "payWithCC" (Visa/Mastercard)
-     * @return payUrl — URL redirect sang trang thanh toán MoMo.
-     */
     public String createPayment(Long orderId, long amount, String orderInfo, String requestType) {
         try {
             String requestId = partnerCode + System.currentTimeMillis();
             String momoOrderId = "MONO-" + orderId + "-" + System.currentTimeMillis();
             String extraData = String.valueOf(orderId);
 
-            // Build raw signature
             String rawSignature = "accessKey=" + accessKey
                     + "&amount=" + amount
                     + "&extraData=" + extraData
@@ -69,7 +61,6 @@ public class MomoService {
 
             String signature = hmacSHA256(secretKey, rawSignature);
 
-            // Build request body
             var body = mapper.createObjectNode();
             body.put("partnerCode", partnerCode);
             body.put("partnerName", "Mono Wear");
@@ -88,9 +79,8 @@ public class MomoService {
             body.put("lang", "vi");
 
             String requestBody = mapper.writeValueAsString(body);
-            LOG.infof("MoMo create payment request for Order #%d, amount: %d", orderId, amount);
+            log.info("MoMo create payment request for Order #{}, amount: {}", orderId, amount);
 
-            // Send HTTP POST
             HttpClient client = HttpClient.newHttpClient();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(apiUrl))
@@ -101,7 +91,7 @@ public class MomoService {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             JsonNode jsonResponse = mapper.readTree(response.body());
 
-            LOG.infof("MoMo response: %s", response.body());
+            log.info("MoMo response: {}", response.body());
 
             int resultCode = jsonResponse.get("resultCode").asInt();
             if (resultCode == 0) {
@@ -110,34 +100,26 @@ public class MomoService {
                 String msg = jsonResponse.has("message") ? jsonResponse.get("message").asText() : "Unknown error";
                 throw new BadRequestException("MoMo error: " + msg);
             }
-        } catch (BadRequestException e) {
-            throw e;
-        } catch (Exception e) {
-            LOG.error("MoMo payment creation failed", e);
+        } catch (BadRequestException e) { throw e; }
+        catch (Exception e) {
+            log.error("MoMo payment creation failed", e);
             throw new BadRequestException("Không thể tạo thanh toán MoMo: " + e.getMessage());
         }
     }
 
-    /**
-     * Xác minh chữ ký IPN callback từ MoMo.
-     */
     public boolean verifySignature(String rawSignature, String signature) {
         try {
             String computed = hmacSHA256(secretKey, rawSignature);
             return computed.equals(signature);
         } catch (Exception e) {
-            LOG.error("Signature verification failed", e);
+            log.error("Signature verification failed", e);
             return false;
         }
     }
 
-    /**
-     * Xử lý IPN callback — cập nhật trạng thái đơn hàng.
-     */
     @Transactional
     public void handleIpn(int resultCode, String extraData, String momoOrderId, String signature, Map<String, Object> params) {
         try {
-            // Verify signature if provided (typically from MoMo Server-to-Server IPN)
             if (signature != null && !signature.isEmpty() && params != null && params.containsKey("signature")) {
                 String transId = params.getOrDefault("transId", "").toString();
                 String message = params.getOrDefault("message", "").toString();
@@ -158,35 +140,21 @@ public class MomoService {
                         + "&resultCode=" + resultCode
                         + "&payType=" + payType;
 
-                LOG.infof("DEBUG MoMo verification: rawSig=[%s], signature=[%s]", rawSig, signature);
-
-                boolean isSignatureValid = verifySignature(rawSig, signature);
-                LOG.infof("DEBUG MoMo verification result: %b", isSignatureValid);
-
-                if (!isSignatureValid) {
-                    LOG.error("MoMo IPN signature verification failed! Possible fraud attempt.");
+                if (!verifySignature(rawSig, signature)) {
+                    log.error("MoMo IPN signature verification failed!");
                     throw new BadRequestException("Invalid signature", "INVALID_SIGNATURE");
                 }
-            } else {
-                LOG.warn("MoMo handleIpn called without signature verification (likely fallback dev callback)");
             }
 
             Long orderId = null;
-
-            // Try to extract from momoOrderId first: MONO-{id}-{timestamp}
             if (momoOrderId != null && momoOrderId.startsWith("MONO-")) {
                 String[] parts = momoOrderId.split("-");
                 if (parts.length >= 2) {
-                    try {
-                        orderId = Long.parseLong(parts[1]);
-                    } catch (NumberFormatException ignored) {}
+                    try { orderId = Long.parseLong(parts[1]); } catch (NumberFormatException ignored) {}
                 }
             }
-
-            // Fallback to extraData
             if (orderId == null && extraData != null && !extraData.isEmpty()) {
                 try {
-                    // If MoMo base64 encodes extraData, it won't be a simple number
                     if (!extraData.matches("\\d+")) {
                         extraData = new String(java.util.Base64.getDecoder().decode(extraData));
                     }
@@ -195,58 +163,42 @@ public class MomoService {
             }
 
             if (orderId == null) {
-                LOG.errorf("MoMo IPN: Cannot determine orderId from extraData=%s, momoOrderId=%s", extraData, momoOrderId);
+                log.error("MoMo IPN: Cannot determine orderId from extraData={}, momoOrderId={}", extraData, momoOrderId);
                 return;
             }
 
-            // Eager-fetch order with items and SKUs to avoid LazyInitializationException
-            Order order = Order.find(
-                "SELECT o FROM Order o LEFT JOIN FETCH o.items i LEFT JOIN FETCH i.sku WHERE o.id = ?1",
-                orderId
-            ).firstResult();
-
-            if (order == null) {
-                LOG.warnf("MoMo IPN: Order #%d not found", orderId);
-                return;
-            }
-
-            // Avoid re-processing already handled orders
-            if (order.status != OrderStatus.PENDING) {
-                LOG.infof("MoMo IPN: Order #%d already processed (status: %s)", orderId, order.status);
+            Order order = orderRepository.findByIdWithItemsAndSkus(orderId).orElse(null);
+            if (order == null) { log.warn("MoMo IPN: Order #{} not found", orderId); return; }
+            if (order.getStatus() != OrderStatus.PENDING) {
+                log.info("MoMo IPN: Order #{} already processed (status: {})", orderId, order.getStatus());
                 return;
             }
 
             if (resultCode == 0) {
-                order.status = OrderStatus.CONFIRMED;
-                LOG.infof("MoMo IPN: Order #%d payment confirmed", orderId);
+                order.setStatus(OrderStatus.CONFIRMED);
+                log.info("MoMo IPN: Order #{} payment confirmed", orderId);
             } else {
-                order.status = OrderStatus.CANCELLED;
-                if (order.items != null) {
-                    for (var item : order.items) {
-                        if (item.sku != null) {
-                            Sku.restoreStock(item.sku.id, item.quantity);
+                order.setStatus(OrderStatus.CANCELLED);
+                if (order.getItems() != null) {
+                    for (var item : order.getItems()) {
+                        if (item.getSku() != null) {
+                            skuRepository.restoreStock(item.getSku().getId(), item.getQuantity());
                         }
                     }
                 }
-                LOG.warnf("MoMo IPN: Order #%d cancelled (payment failed, code: %d)", orderId, resultCode);
+                log.warn("MoMo IPN: Order #{} cancelled (payment failed, code: {})", orderId, resultCode);
             }
-        } catch (BadRequestException e) {
-            throw e;
-        } catch (Exception e) {
-            LOG.error("MoMo IPN: Error processing IPN", e);
-        }
+        } catch (BadRequestException e) { throw e; }
+        catch (Exception e) { log.error("MoMo IPN: Error processing IPN", e); }
     }
 
-    // --- Helper ---
     private String hmacSHA256(String key, String data) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         SecretKeySpec secretKeySpec = new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         mac.init(secretKeySpec);
         byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
         StringBuilder sb = new StringBuilder();
-        for (byte b : hash) {
-            sb.append(String.format("%02x", b));
-        }
+        for (byte b : hash) { sb.append(String.format("%02x", b)); }
         return sb.toString();
     }
 }

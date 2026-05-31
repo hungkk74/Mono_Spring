@@ -6,33 +6,36 @@ import com.monowear.dto.common.PagedResponse;
 import com.monowear.entity.Category;
 import com.monowear.entity.Product;
 import com.monowear.entity.Sku;
-import com.monowear.exception.DuplicateResourceException;
 import com.monowear.exception.ResourceNotFoundException;
-import io.quarkus.panache.common.Page;
-import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.inject.Inject;
-import jakarta.transaction.Transactional;
-import org.jboss.logging.Logger;
+import com.monowear.repository.CategoryRepository;
+import com.monowear.repository.ProductRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.TypedQuery;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-@ApplicationScoped
+@Service
+@RequiredArgsConstructor
+@Slf4j
 public class ProductService {
 
-    private static final Logger LOG = Logger.getLogger(ProductService.class);
-
-    @Inject
-    CategoryService categoryService;
+    private final ProductRepository productRepository;
+    private final CategoryRepository categoryRepository;
+    private final EntityManager em;
 
     // ==================== ADMIN/STAFF ====================
 
-    /**
-     * Lấy danh sách sản phẩm (phân trang, bao gồm inactive).
-     */
     public PagedResponse<ProductResponse> listAll(int page, int size, Long categoryId, String keyword) {
         String countQuery = "SELECT COUNT(p) FROM Product p WHERE 1=1";
         String idQuery = "SELECT p.id FROM Product p WHERE 1=1";
-        var params = new java.util.HashMap<String, Object>();
+        var params = new HashMap<String, Object>();
 
         if (categoryId != null) {
             countQuery += " AND p.category.id = :categoryId";
@@ -46,149 +49,107 @@ public class ProductService {
         }
         idQuery += " ORDER BY p.id DESC";
 
-        // Step 1: Count total
-        var countJpql = Product.getEntityManager().createQuery(countQuery);
-        for (var entry : params.entrySet()) {
-            countJpql.setParameter(entry.getKey(), entry.getValue());
-        }
-        long total = (long) countJpql.getSingleResult();
+        var countJpql = em.createQuery(countQuery, Long.class);
+        params.forEach(countJpql::setParameter);
+        long total = countJpql.getSingleResult();
 
-        if (total == 0) {
-            return PagedResponse.of(List.of(), page, size, 0);
-        }
+        if (total == 0) return PagedResponse.of(List.of(), page, size, 0);
 
-        // Step 2: Get paginated IDs
-        var idJpql = Product.getEntityManager().createQuery(idQuery);
-        for (var entry : params.entrySet()) {
-            idJpql.setParameter(entry.getKey(), entry.getValue());
-        }
-        @SuppressWarnings("unchecked")
-        List<Long> ids = idJpql
-                .setFirstResult(page * size)
-                .setMaxResults(size)
-                .getResultList();
+        var idJpql = em.createQuery(idQuery, Long.class);
+        params.forEach(idJpql::setParameter);
+        List<Long> ids = idJpql.setFirstResult(page * size).setMaxResults(size).getResultList();
 
-        // Step 3: Fetch detail with Category and SKUs in 1 JOIN FETCH query
-        List<ProductResponse> items = Product.find(
-                "SELECT DISTINCT p FROM Product p " +
-                "JOIN FETCH p.category " +
-                "LEFT JOIN FETCH p.skus " +
-                "WHERE p.id IN ?1 ORDER BY p.id DESC", ids)
-                .list()
+        List<ProductResponse> items = productRepository.findAllWithDetailsByIds(ids)
                 .stream()
-                .map(e -> ProductResponse.withSkus((Product) e))
+                .map(ProductResponse::withSkus)
                 .toList();
 
         return PagedResponse.of(items, page, size, total);
     }
 
-    /**
-     * Lấy chi tiết sản phẩm (kèm SKU) theo ID.
-     */
     public ProductResponse getById(Long id) {
         Product product = findOrThrow(id);
         return ProductResponse.withSkus(product);
     }
 
-    /**
-     * Tạo sản phẩm mới.
-     */
     @Transactional
     public ProductResponse create(ProductRequest request) {
-        // Validate category exists
-        Category category = Category.findById(request.categoryId());
-        if (category == null) {
-            throw new ResourceNotFoundException("Danh mục", request.categoryId());
-        }
+        Category category = categoryRepository.findById(request.categoryId())
+                .orElseThrow(() -> new ResourceNotFoundException("Danh mục", request.categoryId()));
 
-        String slug = generateUniqueSlug(request.name(), Product::findBySlug);
+        String slug = generateUniqueSlug(request.name(), productRepository::findBySlug);
         Product product = new Product();
-        product.name = request.name().trim();
-        product.slug = slug;
-        product.material = request.material();
-        product.description = request.description();
-        product.imageUrl = request.imageUrl();
-        product.category = category;
-        product.isActive = true;
-        product.persist();
+        product.setName(request.name().trim());
+        product.setSlug(slug);
+        product.setMaterial(request.material());
+        product.setDescription(request.description());
+        product.setImageUrl(request.imageUrl());
+        product.setCategory(category);
+        product.setIsActive(true);
+        productRepository.save(product);
 
-        LOG.infof("Product created: %s (ID: %d)", product.name, product.id);
+        log.info("Product created: {} (ID: {})", product.getName(), product.getId());
         return ProductResponse.from(product);
     }
 
-    /**
-     * Cập nhật sản phẩm.
-     */
     @Transactional
     public ProductResponse update(Long id, ProductRequest request) {
         Product product = findOrThrow(id);
 
-        // Validate category
-        Category category = Category.findById(request.categoryId());
-        if (category == null) {
-            throw new ResourceNotFoundException("Danh mục", request.categoryId());
-        }
+        Category category = categoryRepository.findById(request.categoryId())
+                .orElseThrow(() -> new ResourceNotFoundException("Danh mục", request.categoryId()));
 
         String newSlug = generateUniqueSlug(request.name(), slug -> {
-            var existing = Product.findBySlug(slug);
-            return existing.filter(p -> !p.id.equals(id));
+            var existing = productRepository.findBySlug(slug);
+            return existing.filter(p -> !p.getId().equals(id));
         });
 
-        product.name = request.name().trim();
-        product.slug = newSlug;
-        product.material = request.material();
-        product.description = request.description();
-        product.imageUrl = request.imageUrl();
-        product.category = category;
+        product.setName(request.name().trim());
+        product.setSlug(newSlug);
+        product.setMaterial(request.material());
+        product.setDescription(request.description());
+        product.setImageUrl(request.imageUrl());
+        product.setCategory(category);
 
-        LOG.infof("Product updated: %s (ID: %d)", product.name, product.id);
+        log.info("Product updated: {} (ID: {})", product.getName(), product.getId());
         return ProductResponse.from(product);
     }
 
-    /**
-     * Soft delete sản phẩm + tất cả SKU liên quan.
-     */
     @Transactional
     public void delete(Long id) {
         Product product = findOrThrow(id);
-        product.isActive = false;
-        // Deactivate all related SKUs
-        if (product.skus != null) {
-            for (Sku sku : product.skus) {
-                sku.isActive = false;
+        product.setIsActive(false);
+        if (product.getSkus() != null) {
+            for (Sku sku : product.getSkus()) {
+                sku.setIsActive(false);
             }
         }
-        LOG.infof("Product soft-deleted: %s (ID: %d)", product.name, product.id);
+        log.info("Product soft-deleted: {} (ID: {})", product.getName(), product.getId());
     }
 
     // ==================== PUBLIC ====================
 
-    /**
-     * Lấy danh sách sản phẩm active (phân trang, lọc theo category, tìm kiếm, size, color).
-     * Khi lọc theo category cha, bao gồm cả sản phẩm thuộc danh mục con.
-     */
-    public PagedResponse<ProductResponse> listActive(int page, int size, Long categoryId, String keyword, java.util.List<String> skuSizes, java.util.List<String> skuColors) {
+    public PagedResponse<ProductResponse> listActive(int page, int size, Long categoryId, String keyword, List<String> skuSizes, List<String> skuColors) {
         return listActive(page, size, categoryId, keyword, skuSizes, skuColors, false);
     }
 
-    public PagedResponse<ProductResponse> listActive(int page, int size, Long categoryId, String keyword, java.util.List<String> skuSizes, java.util.List<String> skuColors, boolean saleOnly) {
+    public PagedResponse<ProductResponse> listActive(int page, int size, Long categoryId, String keyword, List<String> skuSizes, List<String> skuColors, boolean saleOnly) {
         StringBuilder query = new StringBuilder("SELECT DISTINCT p FROM Product p JOIN FETCH p.category");
         StringBuilder countQuery = new StringBuilder("SELECT count(DISTINCT p) FROM Product p");
-        
+
         boolean hasSkuJoin = (skuSizes != null && !skuSizes.isEmpty()) || (skuColors != null && !skuColors.isEmpty());
         if (hasSkuJoin) {
             query.append(" LEFT JOIN p.skus s");
             countQuery.append(" LEFT JOIN p.skus s");
         }
-        
+
         query.append(" WHERE p.isActive = true");
         countQuery.append(" WHERE p.isActive = true");
-        
-        var params = new java.util.HashMap<String, Object>();
+
+        var params = new HashMap<String, Object>();
 
         if (categoryId != null) {
-            // Collect this category + all child category IDs
-            java.util.List<Long> categoryIds = collectCategoryIds(categoryId);
+            List<Long> categoryIds = collectCategoryIds(categoryId);
             query.append(" AND p.category.id IN :categoryIds");
             countQuery.append(" AND p.category.id IN :categoryIds");
             params.put("categoryIds", categoryIds);
@@ -217,28 +178,25 @@ public class ProductService {
             params.put("skuColors", skuColors);
         }
 
-        jakarta.persistence.Query qCount = Product.getEntityManager().createQuery(countQuery.toString());
-        for (java.util.Map.Entry<String, Object> entry : params.entrySet()) {
-            qCount.setParameter(entry.getKey(), entry.getValue());
-        }
-        long total = (long) qCount.getSingleResult();
+        var qCount = em.createQuery(countQuery.toString(), Long.class);
+        params.forEach(qCount::setParameter);
+        long total = qCount.getSingleResult();
 
-        var panacheQuery = Product.find(query.toString(), params);
-        List<ProductResponse> items = panacheQuery
-                .page(Page.of(page, size))
-                .list()
+        TypedQuery<Product> dataQuery = em.createQuery(query.toString(), Product.class);
+        params.forEach(dataQuery::setParameter);
+        List<ProductResponse> items = dataQuery
+                .setFirstResult(page * size)
+                .setMaxResults(size)
+                .getResultList()
                 .stream()
-                .map(e -> ProductResponse.from((Product) e))
+                .map(ProductResponse::from)
                 .toList();
         return PagedResponse.of(items, page, size, total);
     }
 
-    /**
-     * Lấy chi tiết sản phẩm active theo slug (cho frontend).
-     */
     public ProductResponse getBySlug(String slug) {
-        Product product = Product.findBySlug(slug)
-                .filter(p -> p.isActive)
+        Product product = productRepository.findBySlug(slug)
+                .filter(p -> p.getIsActive())
                 .orElseThrow(() -> new ResourceNotFoundException("Sản phẩm", slug));
         return ProductResponse.withSkus(product);
     }
@@ -246,35 +204,20 @@ public class ProductService {
     // ==================== HELPERS ====================
 
     private Product findOrThrow(Long id) {
-        Product product = Product.findById(id);
-        if (product == null) {
-            throw new ResourceNotFoundException("Sản phẩm", id);
-        }
-        return product;
+        return productRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Sản phẩm", id));
     }
 
-    /**
-     * Thu thập categoryId + tất cả ID danh mục con bằng 1 query duy nhất.
-     * Trước: đệ quy N+1 queries. Sau: 1 SELECT lấy tất cả children.
-     */
-    private java.util.List<Long> collectCategoryIds(Long rootId) {
-        java.util.List<Long> ids = new java.util.ArrayList<>();
+    private List<Long> collectCategoryIds(Long rootId) {
+        List<Long> ids = new ArrayList<>();
         ids.add(rootId);
-        // Lấy tất cả active children (1 query flat, không đệ quy)
-        @SuppressWarnings("unchecked")
-        java.util.List<Long> childIds = Category.getEntityManager()
-                .createQuery("SELECT c.id FROM Category c WHERE c.parent.id = :pid AND c.isActive = true")
-                .setParameter("pid", rootId)
-                .getResultList();
+        List<Long> childIds = categoryRepository.findChildIds(rootId);
         for (Long childId : childIds) {
-            ids.addAll(collectCategoryIds(childId)); // chỉ đệ quy nếu có grandchildren
+            ids.addAll(collectCategoryIds(childId));
         }
         return ids;
     }
 
-    /**
-     * Generate unique slug, auto-append suffix if duplicate.
-     */
     private String generateUniqueSlug(String name, java.util.function.Function<String, java.util.Optional<Product>> finder) {
         String baseSlug = CategoryService.generateSlug(name);
         String slug = baseSlug;
