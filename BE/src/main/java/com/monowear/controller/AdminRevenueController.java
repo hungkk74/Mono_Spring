@@ -30,6 +30,8 @@ public class AdminRevenueController {
                 from = to;
             } else if ("7d".equalsIgnoreCase(period)) {
                 from = to.minusDays(6);
+            } else if ("90d".equalsIgnoreCase(period)) {
+                from = to.minusDays(89);
             } else { // default to 30d
                 from = to.minusDays(29);
             }
