@@ -8,10 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/**
- * In-memory OTP store với TTL tự động expire.
- * Thread-safe dùng ConcurrentHashMap.
- */
+
 @Component
 @Slf4j
 public class OtpStore {

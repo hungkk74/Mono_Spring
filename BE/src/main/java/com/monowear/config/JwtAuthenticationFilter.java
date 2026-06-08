@@ -16,10 +16,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.Set;
 
-/**
- * JWT authentication filter — extracts Bearer token from Authorization header,
- * validates it, and sets Spring Security context.
- */
+
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -46,7 +43,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         .toList();
 
                 var authentication = new UsernamePasswordAuthenticationToken(
-                        String.valueOf(userId), // principal = userId as string
+                        String.valueOf(userId),
                         null,
                         authorities
                 );
@@ -54,7 +51,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             } catch (Exception e) {
                 log.debug("JWT validation failed: {}", e.getMessage());
-                // Don't set authentication — will be handled by Spring Security as 401
+
             }
         }
 

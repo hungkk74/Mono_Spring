@@ -13,9 +13,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.util.stream.Collectors;
 
-/**
- * Global Exception Handler — @RestControllerAdvice replacing Quarkus @ServerExceptionMapper.
- */
+
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {

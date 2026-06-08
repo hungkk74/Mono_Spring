@@ -32,7 +32,7 @@ public class ProductService {
     private final CategoryRepository categoryRepository;
     private final EntityManager em;
 
-    // ==================== ADMIN/STAFF ====================
+    // --- Admin ---
 
     public PagedResponse<ProductResponse> listAll(int page, int size, Long categoryId, String keyword) {
         String countQuery = "SELECT COUNT(p) FROM Product p WHERE 1=1";
@@ -129,7 +129,7 @@ public class ProductService {
         log.info("Product soft-deleted: {} (ID: {})", product.getName(), product.getId());
     }
 
-    // ==================== PUBLIC ====================
+    // --- Public ---
 
     public PagedResponse<ProductResponse> listActive(int page, int size, Long categoryId, String keyword, List<String> skuSizes, List<String> skuColors) {
         return listActive(page, size, categoryId, keyword, skuSizes, skuColors, false);
@@ -139,7 +139,7 @@ public class ProductService {
         StringBuilder query = new StringBuilder("SELECT DISTINCT p FROM Product p JOIN FETCH p.category");
         StringBuilder countQuery = new StringBuilder("SELECT count(DISTINCT p) FROM Product p");
 
-        // Clean & normalize size filters for robust exact matching
+        // Normalize size filters
         List<String> cleanSizes = skuSizes == null ? List.of() : skuSizes.stream()
                 .filter(Objects::nonNull)
                 .map(String::trim)
@@ -147,7 +147,7 @@ public class ProductService {
                 .filter(s -> !s.isEmpty())
                 .toList();
 
-        // Clean color filters (keeping original case for LIKE mapping but will be lowercased for binding)
+        // Normalize color filters
         List<String> cleanColors = skuColors == null ? List.of() : skuColors.stream()
                 .filter(Objects::nonNull)
                 .map(String::trim)
@@ -219,7 +219,7 @@ public class ProductService {
                 .setMaxResults(size)
                 .getResultList();
 
-        // Optimized bulk query to avoid N+1 queries
+        // Load SKU theo batch
         Map<Long, List<Sku>> skusMap = new HashMap<>();
         if (!products.isEmpty()) {
             List<Long> productIds = products.stream().map(Product::getId).toList();
@@ -245,7 +245,7 @@ public class ProductService {
         return ProductResponse.withSkus(product);
     }
 
-    // ==================== HELPERS ====================
+
 
     private Product findOrThrow(Long id) {
         return productRepository.findById(id)

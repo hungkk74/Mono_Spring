@@ -7,10 +7,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Blacklist cho Reset Token (JWT jti).
- * Đảm bảo mỗi Reset Token chỉ dùng được đúng 1 lần.
- */
+
 @Component
 @Slf4j
 public class ResetTokenBlacklist {

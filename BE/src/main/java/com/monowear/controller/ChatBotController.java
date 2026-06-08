@@ -48,7 +48,7 @@ public class ChatBotController {
 
         log.info("ChatBot stateful query: {}", request.message());
 
-        // 1. Phân tích ngữ cảnh Đơn hàng thực tế
+        // Tra đơn hàng nếu có mã
         String orderContext = "";
         Pattern orderPattern = Pattern.compile("#?(\\d{1,12})");
         Matcher orderMatcher = orderPattern.matcher(request.message());
@@ -71,7 +71,7 @@ public class ChatBotController {
             }
         }
 
-        // 2. Phân tích ngữ cảnh cá nhân hóa người dùng
+        // Thêm context user
         String finalSystemPrompt = SYSTEM_PROMPT;
         if (request.userContext() != null && request.userContext().fullName() != null && !request.userContext().fullName().isBlank()) {
             finalSystemPrompt += String.format(
@@ -88,7 +88,7 @@ public class ChatBotController {
             finalSystemPrompt += orderContext + "\nHãy dựa vào dữ liệu [THÔNG TIN ĐƠN HÀNG THỰC TẾ] phía trên để trả lời trực tiếp và tóm tắt ngắn gọn trạng thái đơn hàng này cho khách hàng.";
         }
 
-        // 3. Gọi OpenRouter với đầy đủ hội thoại lịch sử
+        // Gọi AI
         String answer = openRouterService.chat(finalSystemPrompt, request.message(), request.history());
 
         List<ProductResponse> products = new ArrayList<>();

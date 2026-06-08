@@ -57,7 +57,7 @@ public class Product {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    // --- Lifecycle Callbacks ---
+
 
     @PrePersist
     void onPrePersist() {
@@ -70,7 +70,7 @@ public class Product {
         updatedAt = LocalDateTime.now();
     }
 
-    // --- Business Methods ---
+
 
     public boolean isOnSale() {
         if (salePercent == null || salePercent <= 0) return false;

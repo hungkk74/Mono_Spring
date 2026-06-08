@@ -11,9 +11,7 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * Khởi tạo dữ liệu mặc định khi server start (dev mode).
- */
+
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -25,13 +23,13 @@ public class DataSeeder implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        // 1. Cập nhật mật khẩu cho tài khoản Admin
+
         userRepository.findByEmail("admin@monowear.io").ifPresent(admin -> {
             admin.setPasswordHash(authService.hashPasswordPublic("Admin@123"));
             log.info("Admin password has been re-synced on startup.");
         });
 
-        // 2. Tạo tài khoản Staff mặc định nếu chưa tồn tại
+
         String staffEmail = "staff@monowear.io";
         if (userRepository.findByEmail(staffEmail).isEmpty()) {
             User staff = new User();

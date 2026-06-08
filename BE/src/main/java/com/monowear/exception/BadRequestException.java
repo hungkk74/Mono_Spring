@@ -1,8 +1,6 @@
 package com.monowear.exception;
 
-/**
- * Business logic exception — HTTP 400.
- */
+
 public class BadRequestException extends RuntimeException {
 
     private final String errorCode;

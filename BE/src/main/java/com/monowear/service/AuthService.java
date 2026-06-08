@@ -33,9 +33,7 @@ public class AuthService {
     @org.springframework.beans.factory.annotation.Value("${firebase.api-key:AIzaSyDZr-k5hCgQPCwN3-n_WIx5nCKkdFJenq0}")
     private String firebaseApiKey;
 
-    /**
-     * Đăng ký tài khoản mới (CUSTOMER).
-     */
+    // Đăng ký
     @Transactional
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.findByEmail(request.email().trim().toLowerCase()).isPresent()) {
@@ -58,9 +56,7 @@ public class AuthService {
         return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserResponse.from(user));
     }
 
-    /**
-     * Đăng nhập bằng email + password.
-     */
+    // Đăng nhập
     public AuthResponse login(LoginRequest request) {
         User user = userRepository.findByEmail(request.email().trim().toLowerCase())
                 .orElseThrow(() -> new BadRequestException("Email hoặc mật khẩu không đúng", "INVALID_CREDENTIALS"));
@@ -79,15 +75,13 @@ public class AuthService {
         return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserResponse.from(user));
     }
 
-    /**
-     * Đăng nhập / Đăng ký tự động bằng tài khoản Google.
-     */
+    // Đăng nhập Google
     public AuthResponse loginWithGoogle(String idToken) {
         if (idToken == null || idToken.isBlank()) {
             throw new BadRequestException("Google ID Token không được để trống", "GOOGLE_TOKEN_REQUIRED");
         }
 
-        // 1. Xác thực ID Token qua Google API
+        // Xác thực token
         java.util.Map<String, Object> claims = verifyGoogleIdToken(idToken);
         String email = (String) claims.get("email");
         String name = (String) claims.get("name");
@@ -98,7 +92,7 @@ public class AuthService {
 
         String normalized = email.trim().toLowerCase();
 
-        // 2. Tìm kiếm hoặc tự động đăng ký khách hàng mới
+        // Tìm hoặc tạo user
         User user = userRepository.findByEmail(normalized).orElse(null);
         if (user == null) {
             user = new User();
@@ -116,7 +110,7 @@ public class AuthService {
             log.info("Google user logged in: {} (ID: {})", user.getEmail(), user.getId());
         }
 
-        // 3. Tạo JWT access token và phản hồi
+        // Tạo JWT
         String token = generateToken(user);
         return AuthResponse.of(token, jwtService.getExpirationSeconds(), UserResponse.from(user));
     }
@@ -162,9 +156,7 @@ public class AuthService {
         }
     }
 
-    /**
-     * Lấy thông tin user hiện tại từ JWT subject (userId).
-     */
+    // Lấy user hiện tại
     public UserResponse getCurrentUser(String userId) {
         User user = userRepository.findById(Long.parseLong(userId)).orElse(null);
         if (user == null || !user.getIsActive()) {
@@ -173,9 +165,7 @@ public class AuthService {
         return UserResponse.from(user);
     }
 
-    /**
-     * Cập nhật hồ sơ cá nhân (Customer tự update).
-     */
+    // Cập nhật profile
     @Transactional
     public UserResponse updateProfile(String userId, UpdateProfileRequest request) {
         User user = userRepository.findById(Long.parseLong(userId)).orElse(null);
@@ -197,11 +187,9 @@ public class AuthService {
         return UserResponse.from(user);
     }
 
-    // ===================== FORGOT PASSWORD FLOW =====================
+    // --- Quên mật khẩu ---
 
-    /**
-     * Bước 1: Sinh OTP 6 số, lưu in-memory (TTL 5 phút), gửi email qua Resend.
-     */
+    // Gửi OTP
     public void requestOtp(String email) {
         String normalized = email.trim().toLowerCase();
         User user = userRepository.findByEmail(normalized).orElse(null);
@@ -215,9 +203,7 @@ public class AuthService {
         log.info("OTP sent to {}", normalized);
     }
 
-    /**
-     * Bước 2: Xác thực OTP → xóa OTP khỏi store → trả về Reset Token (JWT 15 phút).
-     */
+    // Xác thực OTP → trả reset token
     public ResetTokenResponse verifyOtp(String email, String code) {
         String normalized = email.trim().toLowerCase();
         if (!otpStore.verify(normalized, code)) {
@@ -234,9 +220,7 @@ public class AuthService {
         return ResetTokenResponse.of(resetToken, RESET_TOKEN_LIFESPAN);
     }
 
-    /**
-     * Bước 3: Xác minh Reset Token → đổi mật khẩu → blacklist token.
-     */
+    // Đổi mật khẩu bằng reset token
     @Transactional
     public void resetPassword(String resetToken, String newPassword) {
         try {
@@ -272,15 +256,13 @@ public class AuthService {
         }
     }
 
-    // ===================== PRIVATE HELPERS =====================
+
 
     private String generateToken(User user) {
         return jwtService.generateToken(user.getId(), user.getEmail(), user.getRole().name(), user.getFullName());
     }
 
-    /**
-     * Public wrapper — dùng cho UserService tạo staff.
-     */
+    // Hash password (public cho UserService dùng)
     public String hashPasswordPublic(String plainPassword) {
         return passwordEncoder.encode(plainPassword);
     }

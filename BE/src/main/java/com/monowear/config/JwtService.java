@@ -21,9 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * JWT token generation & validation using RSA keys (jjwt 0.12.x).
- */
+
 @Component
 @Slf4j
 public class JwtService {
@@ -58,9 +56,7 @@ public class JwtService {
         return expirationSeconds;
     }
 
-    /**
-     * Generate access token for authenticated user.
-     */
+    // Tạo access token
     public String generateToken(Long userId, String email, String role, String fullName) {
         return Jwts.builder()
                 .issuer(issuer)
@@ -74,9 +70,7 @@ public class JwtService {
                 .compact();
     }
 
-    /**
-     * Generate short-lived reset token for password recovery.
-     */
+    // Tạo reset token
     public String generateResetToken(Long userId, String email, long lifespanSeconds) {
         return Jwts.builder()
                 .issuer(issuer)
@@ -90,9 +84,7 @@ public class JwtService {
                 .compact();
     }
 
-    /**
-     * Parse and validate JWT token. Returns claims or throws exception.
-     */
+    // Parse và validate token
     public Claims parseToken(String token) {
         return Jwts.parser()
                 .verifyWith(publicKey)
@@ -102,16 +94,12 @@ public class JwtService {
                 .getPayload();
     }
 
-    /**
-     * Extract user ID from token subject.
-     */
+
     public Long getUserId(Claims claims) {
         return Long.parseLong(claims.getSubject());
     }
 
-    /**
-     * Extract roles from token claims.
-     */
+
     @SuppressWarnings("unchecked")
     public Set<String> getRoles(Claims claims) {
         Object groups = claims.get("groups");
@@ -121,7 +109,7 @@ public class JwtService {
         return Set.of();
     }
 
-    // --- Key Loading ---
+
 
     private PrivateKey loadPrivateKey(Resource resource) throws Exception {
         String pem = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);

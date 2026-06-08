@@ -37,7 +37,7 @@ public class OrderItem {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    // --- Lifecycle Callbacks ---
+
 
     @PrePersist
     void onPrePersist() {

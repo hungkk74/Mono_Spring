@@ -17,18 +17,13 @@ public interface SkuRepository extends JpaRepository<Sku, Long> {
 
     long countByProductId(Long productId);
 
-    /**
-     * Atomic stock deduction using optimistic locking.
-     * Returns 1 on success, 0 on conflict/insufficient stock.
-     */
+    // Trừ tồn kho (trả 1 nếu thành công, 0 nếu không đủ)
     @Modifying
     @Query("UPDATE Sku s SET s.stock = s.stock - :qty, s.version = s.version + 1 " +
            "WHERE s.id = :id AND s.stock >= :qty")
     int deductStock(@Param("id") Long id, @Param("qty") int qty);
 
-    /**
-     * Atomic stock restoration.
-     */
+    // Hoàn tồn kho
     @Modifying
     @Query("UPDATE Sku s SET s.stock = s.stock + :qty, s.version = s.version + 1 WHERE s.id = :id")
     int restoreStock(@Param("id") Long id, @Param("qty") int qty);

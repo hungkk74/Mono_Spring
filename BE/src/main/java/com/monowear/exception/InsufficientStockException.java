@@ -1,9 +1,6 @@
 package com.monowear.exception;
 
-/**
- * Insufficient stock exception — HTTP 409 Conflict.
- * Thrown when stock deduction fails due to race condition or out of stock.
- */
+
 public class InsufficientStockException extends RuntimeException {
 
     private final Long skuId;

@@ -28,9 +28,7 @@ public record ProductResponse(
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {
-    /**
-     * Mapping flat (không kèm SKU).
-     */
+    // Mapping không kèm SKU
     public static ProductResponse from(Product product) {
         return new ProductResponse(
                 product.getId(),
@@ -54,9 +52,7 @@ public record ProductResponse(
         );
     }
 
-    /**
-     * Mapping flat kèm danh sách SKU bên ngoài để tránh N+1.
-     */
+    // Mapping kèm SKU (từ list ngoài)
     public static ProductResponse from(Product product, List<Sku> activeSkus) {
         BigDecimal minPrice = activeSkus == null || activeSkus.isEmpty() ? null : activeSkus.stream()
                 .filter(sku -> sku.getPrice() != null)
@@ -87,9 +83,7 @@ public record ProductResponse(
     }
 
 
-    /**
-     * Mapping kèm danh sách SKU (cho trang chi tiết).
-     */
+    // Mapping kèm SKU (cho chi tiết)
     public static ProductResponse withSkus(Product product) {
         List<SkuResponse> skuList = null;
         if (product.getSkus() != null && !product.getSkus().isEmpty()) {

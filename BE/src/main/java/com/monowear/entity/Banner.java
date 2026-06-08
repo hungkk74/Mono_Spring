@@ -51,7 +51,7 @@ public class Banner {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
-    // --- Lifecycle Callbacks ---
+
 
     @PrePersist
     void onPrePersist() {

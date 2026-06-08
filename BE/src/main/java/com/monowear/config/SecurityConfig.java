@@ -37,13 +37,13 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // Public endpoints
+
                 .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/google").permitAll()
                 .requestMatchers("/api/auth/forgot-password", "/api/auth/verify-otp", "/api/auth/reset-password").permitAll()
                 .requestMatchers("/api/public/**").permitAll()
                 .requestMatchers("/api/payment/momo/ipn").permitAll()
                 .requestMatchers("/api/payment/payos/webhook").permitAll()
-                // All other API endpoints require authentication
+
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll()
             )

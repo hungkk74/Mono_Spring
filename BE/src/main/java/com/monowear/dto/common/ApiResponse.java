@@ -2,14 +2,7 @@ package com.monowear.dto.common;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 
-/**
- * Chuẩn hóa Response cho toàn bộ API.
- *
- * @param status  HTTP status code (200, 400, 404, 500...)
- * @param message Thông báo ngắn gọn cho client
- * @param data    Payload trả về (nullable)
- * @param errorCode Mã lỗi nội bộ cho frontend xử lý (nullable)
- */
+
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ApiResponse<T>(
         int status,
@@ -18,7 +11,7 @@ public record ApiResponse<T>(
         String errorCode
 ) {
 
-    // --- Factory Methods ---
+
 
     public static <T> ApiResponse<T> success(T data) {
         return new ApiResponse<>(200, "Thành công", data, null);

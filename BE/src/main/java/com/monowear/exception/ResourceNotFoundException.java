@@ -1,8 +1,6 @@
 package com.monowear.exception;
 
-/**
- * Resource not found exception — HTTP 404.
- */
+
 public class ResourceNotFoundException extends RuntimeException {
 
     private final String resourceName;

@@ -12,9 +12,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
-/**
- * Gửi email qua Resend REST API (https://api.resend.com).
- */
+
 @Service
 @Slf4j
 public class EmailService {
@@ -34,9 +32,7 @@ public class EmailService {
     @Value("${resend.from-name:MONO WEAR}")
     private String fromName;
 
-    /**
-     * Gửi OTP qua email (async).
-     */
+    // Gửi OTP qua email
     @Async
     public void sendOtpEmail(String toEmail, String recipientName, String otpCode, int ttlMinutes) {
         log.info("================================================================");
@@ -47,7 +43,7 @@ public class EmailService {
         sendEmail(toEmail, subject, html);
     }
 
-    // ===================== PRIVATE =====================
+
 
     private void sendEmail(String to, String subject, String htmlBody) {
         String fromField = fromName + " <" + fromEmail + ">";

@@ -114,7 +114,7 @@ public class PaymentController {
         return ResponseEntity.noContent().build();
     }
 
-    // --- Helpers ---
+
     private Long parseLongSafely(Object value) {
         if (value == null) return null;
         if (value instanceof Number) return ((Number) value).longValue();

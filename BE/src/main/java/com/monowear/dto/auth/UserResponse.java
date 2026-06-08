@@ -4,9 +4,6 @@ import com.monowear.entity.User;
 import com.monowear.entity.enums.UserRole;
 import java.time.LocalDateTime;
 
-/**
- * DTO trả về thông tin user (KHÔNG BAO GIỜ chứa password).
- */
 public record UserResponse(
         Long id,
         String email,

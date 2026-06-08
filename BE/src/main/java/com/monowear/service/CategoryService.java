@@ -27,7 +27,7 @@ public class CategoryService {
 
     private final CategoryRepository categoryRepository;
 
-    // ==================== ADMIN/STAFF ====================
+    // --- Admin ---
 
     public PagedResponse<CategoryResponse> listAll(int page, int size) {
         Page<Category> result = categoryRepository.findAll(PageRequest.of(page, size));
@@ -96,7 +96,7 @@ public class CategoryService {
         log.info("Category soft-deleted: {} (ID: {})", category.getName(), category.getId());
     }
 
-    // ==================== PUBLIC ====================
+    // --- Public ---
 
     public List<CategoryResponse> getActiveTree() {
         List<Category> roots = categoryRepository.findRootCategories();
@@ -112,7 +112,7 @@ public class CategoryService {
         return CategoryResponse.withChildren(category);
     }
 
-    // ==================== HELPERS ====================
+
 
     private Category findOrThrow(Long id) {
         return categoryRepository.findById(id)

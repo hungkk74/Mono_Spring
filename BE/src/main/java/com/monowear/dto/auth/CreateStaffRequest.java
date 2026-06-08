@@ -4,9 +4,6 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
-/**
- * DTO tạo nhân viên (ADMIN only).
- */
 public record CreateStaffRequest(
         @NotBlank(message = "Email không được để trống")
         @Email(message = "Email không đúng định dạng")
